@@ -9,7 +9,7 @@ const COLS = [
   { key: 'status',        label: 'Status',       width: 100, type: 'select', opts: ['Active','Not Listed'] },
   { key: 'brand',         label: 'Brand',        width: 160, type: 'select', opts: BRANDS.map(b => b.name) },
   { key: 'category',      label: 'Category',     width: 140, type: 'text' },
-  { key: 'product_name',  label: 'Product Name', width: 180, type: 'text' },
+  { key: 'product_name',  label: 'Product Name', width: 140, type: 'text' },
   { key: 'sku_id',        label: 'SKU ID',       width: 180, type: 'text',   mono: true },
   { key: 'upc',           label: 'UPC / EAN',    width: 140, type: 'text',   mono: true },
   { key: 'asin',          label: 'ASIN',         width: 120, type: 'text',   mono: true },

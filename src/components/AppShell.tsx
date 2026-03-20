@@ -131,7 +131,9 @@ export default function AppShell({ user, onSignOut }: { user: User; onSignOut: (
   const filtered = activeProducts.filter(p => {
     if (brandFilter && p.brand !== brandFilter) return false
     if (catFilter && p.category !== catFilter) return false
-    if (statusFilter && p.status !== statusFilter) return false
+    if (statusFilter === "Discontinued" && !p.discontinued) return false
+    if (statusFilter === "Active" && (p.discontinued || p.status !== "Active")) return false
+    if (statusFilter === "Not Listed" && (p.discontinued || p.status !== "Not Listed")) return false
     if (search) {
       const hay = [p.product_name, p.sku_id, p.asin, p.upc, p.brand, p.category, p.color, p.warpfy_code].join(' ').toLowerCase()
       if (!hay.includes(search.toLowerCase())) return false
@@ -230,6 +232,7 @@ export default function AppShell({ user, onSignOut }: { user: User; onSignOut: (
                   <option value="">All Status</option>
                   <option>Active</option>
                   <option>Not Listed</option>
+                  <option>Discontinued</option>
                 </select>
               </>
             )}
