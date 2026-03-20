@@ -9,8 +9,9 @@ import ProductSheet from './ProductSheet'
 import CostMaster from './CostMaster'
 import UpcManager from './UpcManager'
 import Pipeline from './Pipeline'
+import InventoryDashboard from './inventory/InventoryDashboard'
 
-type Tab = 'catalog' | 'pipeline' | 'upc' | 'costs'
+type Tab = 'catalog' | 'pipeline' | 'upc' | 'costs' | 'inventory'
 
 export default function AppShell({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   const supabase = createClient()
@@ -175,15 +176,16 @@ export default function AppShell({ user, onSignOut }: { user: User; onSignOut: (
         </div>
 
         <div className="s-section">Views</div>
-        {(['catalog','pipeline','upc','costs'] as Tab[]).map(t => (
+        {(['catalog','pipeline','upc','costs','inventory'] as Tab[]).map(t => (
           <div key={t} className={`s-nav ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-            {t === 'catalog' ? '📦' : t === 'pipeline' ? '🔄' : t === 'upc' ? '🏷️' : '💰'}
-            {' '}{t === 'catalog' ? 'Products' : t === 'pipeline' ? 'Pipeline' : t === 'upc' ? 'UPC Manager' : 'Cost Master'}
+            {t === 'catalog' ? '📦' : t === 'pipeline' ? '🔄' : t === 'upc' ? '🏷️' : t === 'costs' ? '💰' : '📊'}
+            {' '}{t === 'catalog' ? 'Products' : t === 'pipeline' ? 'Pipeline' : t === 'upc' ? 'UPC Manager' : t === 'costs' ? 'Cost Master' : 'Inventory Planner'}
             <span className="s-badge">
-              {t === 'catalog'  && activeProducts.length}
-              {t === 'pipeline' && pipelineProducts.length}
-              {t === 'upc'      && 'pools'}
-              {t === 'costs'    && costs.length}
+              {t === 'catalog'   && activeProducts.length}
+              {t === 'pipeline'  && pipelineProducts.length}
+              {t === 'upc'       && 'pools'}
+              {t === 'costs'     && costs.length}
+              {t === 'inventory' && 'new'}
             </span>
           </div>
         ))}
@@ -294,6 +296,9 @@ export default function AppShell({ user, onSignOut }: { user: User; onSignOut: (
                   onSave={saveCost}
                   onDelete={deleteCost}
                 />
+              )}
+              {tab === 'inventory' && (
+                <InventoryDashboard userEmail={user.email ?? ''} />
               )}
             </>
           )}
