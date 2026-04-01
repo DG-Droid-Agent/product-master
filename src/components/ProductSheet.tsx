@@ -1,17 +1,17 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import type { Product, Supplier, ChangeLog } from '@/lib/types'
 import { BRANDS, brandColor } from '@/lib/types'
 import SupplierPanel from './SupplierPanel'
 
 const COLS = [
-  { key: 'status',        label: 'Status',       width: 100, type: 'select', opts: ['Active','Not Listed'] },
+  { key: 'status',        label: 'Status',       width: 100, type: 'select', opts: ['Active','Not Listed','Discontinued'] },
   { key: 'brand',         label: 'Brand',        width: 160, type: 'select', opts: BRANDS.map(b => b.name) },
   { key: 'category',      label: 'Category',     width: 140, type: 'text' },
-  { key: 'product_name',  label: 'Product Name', width: 140, type: 'text' },
+  { key: 'product_name',  label: 'Product Name', width: 180, type: 'text' },
   { key: 'sku_id',        label: 'SKU ID',       width: 180, type: 'text',   mono: true },
-  { key: 'upc',           label: 'UPC / EAN',    width: 140, type: 'text',   mono: true },
+  { key: 'upc',           label: 'UPC / EAN',    width: 150, type: 'upc' },
   { key: 'asin',          label: 'ASIN',         width: 120, type: 'text',   mono: true },
   { key: 'warpfy_code',   label: 'Warpfy',       width: 110, type: 'text',   mono: true },
   { key: 'color',         label: 'Color',        width: 110, type: 'text' },
@@ -41,12 +41,17 @@ export default function ProductSheet({
   onSaveSupplier: (s: Supplier) => Promise<void>
   onDeleteSupplier: (id: string) => Promise<void>
 }) {
-  const [editCell, setEditCell] = useState<EditCell>(null)
-  const [editValue, setEditValue] = useState('')
+  const [editCell, setEditCell]       = useState<EditCell>(null)
+  const [editValue, setEditValue]     = useState('')
   const [editOriginal, setEditOriginal] = useState<Product | null>(null)
-  const [pendingNew, setPendingNew] = useState<Product | null>(null)
+  const [pendingNew, setPendingNew]   = useState<Product | null>(null)
   const [supplierPanelSku, setSupplierPanelSku] = useState<string | null>(null)
+  const [saving, setSaving]           = useState<string | null>(null) // sku being saved
+  const [saveError, setSaveError]     = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
+
+  // Track pending edit value via ref so onBlur always has latest value
+  const editValueRef = useRef('')
 
   function suppliersForSku(skuId: string) {
     return suppliers.filter(s => s.sku_id === skuId)
@@ -54,50 +59,63 @@ export default function ProductSheet({
   function changelogForSku(skuId: string) {
     return changelog.filter(c => c.sku_id === skuId)
   }
-
   function getActiveSup(skuId: string): Supplier | undefined {
     const sups = suppliersForSku(skuId)
     return sups.find(s => s.is_active) ?? sups[0]
   }
 
   function startEdit(product: Product, key: string) {
+    // Commit any pending edit first
+    if (editCell) {
+      const prev = allProducts.find(x => x.id === editCell.productId)
+      if (prev) doCommit(prev, editCell.key, editValueRef.current)
+    }
+    const val = String((product as any)[key] ?? '')
     setEditCell({ productId: product.id!, key })
-    setEditValue(String((product as any)[key] ?? ''))
+    setEditValue(val)
+    editValueRef.current = val
     setEditOriginal({ ...product })
     setTimeout(() => (inputRef.current as any)?.focus?.(), 30)
   }
 
-  async function commitEdit(product: Product, key: string, value: string) {
+  async function doCommit(product: Product, key: string, value: string) {
+    const original = editOriginal ?? product
     setEditCell(null)
-    if (String((product as any)[key] ?? '') === value) return
-    await onSave({ ...product, [key]: value }, editOriginal ?? undefined)
     setEditOriginal(null)
-  }
-
-  function addNewRow() {
-    const p: Product = {
-      status: 'Active', brand: brandFilter || BRANDS[0].name,
-      category: '', product_name: '', sku_id: '',
-      prod_dim_unit: 'In', prod_weight_unit: 'Lb',
-      pkg_dim_unit: 'In',  pkg_weight_unit: 'Lb',
-      carton_unit: 'In',   carton_weight_unit: 'Lb',
-      discontinued: false,
-    }
-    setPendingNew(p)
+    if (String((product as any)[key] ?? '') === value) return
+    setSaving(product.sku_id)
+    setSaveError(null)
+    const ok = await onSave({ ...product, [key]: value }, original)
+    setSaving(null)
+    if (!ok) setSaveError(`Failed to save ${product.sku_id}`)
   }
 
   async function savePending() {
     if (!pendingNew) return
-    if (!pendingNew.sku_id) { alert('SKU ID is required'); return }
-    if (allProducts.find(p => p.sku_id === pendingNew.sku_id)) { alert('SKU already exists'); return }
-    const ok = await onSave(pendingNew)
-    if (ok) setPendingNew(null)
+    const sku = pendingNew.sku_id?.trim()
+    if (!sku) { setSaveError('SKU ID is required to save a new product'); return }
+    if (allProducts.find(p => p.sku_id === sku)) { setSaveError(`SKU "${sku}" already exists`); return }
+    setSaving('new')
+    setSaveError(null)
+    const ok = await onSave({ ...pendingNew, sku_id: sku })
+    setSaving(null)
+    if (ok) {
+      setPendingNew(null)
+    } else {
+      setSaveError('Failed to save new product — check required fields')
+    }
   }
 
   function statusBadge(p: Product) {
-    if (p.discontinued) return <span className="badge badge-discontinued">Discontinued</span>
+    if (p.discontinued || p.status === 'Discontinued') return <span className="badge badge-discontinued">Discontinued</span>
     if (p.status === 'Active') return <span className="badge badge-active">Active</span>
     return <span className="badge badge-notlisted">Not Listed</span>
+  }
+
+  function upcDisplay(val: string) {
+    if (!val || val === 'nan' || val === '') return <span style={{ color: 'var(--text3)', fontSize: 11 }}>—</span>
+    if (val === 'Exempt') return <span style={{ fontSize: 10, padding: '1px 6px', background: 'var(--surface3)', color: 'var(--text3)', borderRadius: 3, border: '1px solid var(--border)', fontFamily: 'var(--mono)' }}>Exempt</span>
+    return <span className="cell-text mono">{val}</span>
   }
 
   function dimsDisplay(p: Product, fields: string[]) {
@@ -109,11 +127,18 @@ export default function ProductSheet({
   }
 
   const panelProduct = supplierPanelSku ? (allProducts.find(p => p.sku_id === supplierPanelSku) ?? null) : null
-
   const allRows = [...(pendingNew ? [pendingNew] : []), ...products]
 
   return (
     <>
+      {/* Save error banner */}
+      {saveError && (
+        <div style={{ background: 'var(--red-light)', borderBottom: '1px solid rgba(192,57,43,.2)', padding: '8px 16px', fontSize: 12, color: 'var(--red)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+          ⚠ {saveError}
+          <button onClick={() => setSaveError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: 14 }}>✕</button>
+        </div>
+      )}
+
       <div className="sheet-wrap">
         <table className="sheet-table">
           <thead>
@@ -125,8 +150,9 @@ export default function ProductSheet({
           </thead>
           <tbody>
             {allRows.map((p, i) => {
-              const isNew  = !p.id
-              const isDupe = p.sku_id ? dupeSkus.has(p.sku_id) : false
+              const isNew   = !p.id
+              const isDupe  = p.sku_id ? dupeSkus.has(p.sku_id) : false
+              const isSaving = saving === p.sku_id || (isNew && saving === 'new')
               const activeSup = p.sku_id ? getActiveSup(p.sku_id) : undefined
               const supCount  = p.sku_id ? suppliersForSku(p.sku_id).length : 0
 
@@ -134,7 +160,9 @@ export default function ProductSheet({
                 <tr key={p.id || 'new'} className={isDupe ? 'dupe-flag' : isNew ? 'new-row' : ''}>
                   <td>
                     <div className="cell-inner" style={{ justifyContent: 'center' }}>
-                      {isNew ? '✦' : i + 1}
+                      {isSaving
+                        ? <span style={{ fontSize: 11, color: 'var(--accent)', animation: 'spin 1s linear infinite' }}>⟳</span>
+                        : isNew ? '✦' : i + 1}
                     </div>
                   </td>
 
@@ -178,32 +206,99 @@ export default function ProductSheet({
                       )
                     }
 
-                    if (isEditing || (isNew && col.type !== 'dims')) {
+                    // UPC field — special display with Exempt badge
+                    if (col.type === 'upc' && !isEditing && !isNew) {
+                      return (
+                        <td key={col.key} onClick={() => p.id && startEdit(p, col.key)}>
+                          <div className="cell-inner">{upcDisplay(val)}</div>
+                        </td>
+                      )
+                    }
+
+                    // Editing state
+                    if (isEditing || isNew) {
                       if (col.type === 'select') {
                         return (
                           <td key={col.key}>
-                            <select ref={inputRef as any} className="cell-select"
+                            <select
+                              ref={inputRef as any}
+                              className="cell-select"
                               value={isNew ? String((pendingNew as any)?.[col.key] ?? '') : editValue}
                               onChange={e => {
-                                if (isNew) setPendingNew(prev => ({ ...prev!, [col.key]: e.target.value }))
-                                else setEditValue(e.target.value)
-                              }}
-                              onBlur={() => { if (!isNew) commitEdit(p, col.key, editValue) }}>
+                                const v = e.target.value
+                                if (isNew) {
+                                  setPendingNew(prev => ({ ...prev!, [col.key]: v }))
+                                } else {
+                                  setEditValue(v)
+                                  editValueRef.current = v
+                                  // Select saves immediately on change
+                                  doCommit(p, col.key, v)
+                                }
+                              }}>
                               {col.opts?.map(o => <option key={o}>{o}</option>)}
                             </select>
                           </td>
                         )
                       }
+
+                      // UPC field in edit mode — text + Exempt button
+                      if (col.type === 'upc') {
+                        const upcVal = isNew ? String((pendingNew as any)?.upc ?? '') : editValue
+                        return (
+                          <td key={col.key} style={{ minWidth: 150 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                              <input
+                                ref={inputRef as any}
+                                className="cell-edit mono"
+                                value={upcVal}
+                                placeholder="UPC or Exempt"
+                                onChange={e => {
+                                  const v = e.target.value
+                                  if (isNew) setPendingNew(prev => ({ ...prev!, upc: v }))
+                                  else { setEditValue(v); editValueRef.current = v }
+                                }}
+                                onBlur={() => { if (!isNew) doCommit(p, 'upc', editValueRef.current) }}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); (e.target as HTMLElement).blur() }
+                                  if (e.key === 'Escape') { setEditCell(null) }
+                                }}
+                                style={{ flex: 1, border: 'none', outline: 'none', padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11, background: 'transparent', color: 'var(--text)' }}
+                              />
+                              <button
+                                title="Mark as Exempt (no UPC needed)"
+                                onMouseDown={e => {
+                                  e.preventDefault() // prevent input blur
+                                  const v = upcVal === 'Exempt' ? '' : 'Exempt'
+                                  if (isNew) setPendingNew(prev => ({ ...prev!, upc: v }))
+                                  else { setEditValue(v); editValueRef.current = v; doCommit(p, 'upc', v) }
+                                }}
+                                style={{
+                                  padding: '2px 6px', fontSize: 9, fontWeight: 600,
+                                  background: upcVal === 'Exempt' ? 'var(--surface3)' : 'var(--surface2)',
+                                  color: upcVal === 'Exempt' ? 'var(--text2)' : 'var(--text3)',
+                                  border: '1px solid var(--border)', borderRadius: 3,
+                                  cursor: 'pointer', marginRight: 4, whiteSpace: 'nowrap',
+                                  fontFamily: 'var(--font)',
+                                }}>
+                                {upcVal === 'Exempt' ? '✓ Exempt' : 'Exempt'}
+                              </button>
+                            </div>
+                          </td>
+                        )
+                      }
+
                       return (
                         <td key={col.key}>
-                          <input ref={inputRef as any}
+                          <input
+                            ref={inputRef as any}
                             className={`cell-edit ${col.mono ? 'mono' : ''}`}
                             value={isNew ? String((pendingNew as any)?.[col.key] ?? '') : editValue}
                             onChange={e => {
-                              if (isNew) setPendingNew(prev => ({ ...prev!, [col.key]: e.target.value }))
-                              else setEditValue(e.target.value)
+                              const v = e.target.value
+                              if (isNew) setPendingNew(prev => ({ ...prev!, [col.key]: v }))
+                              else { setEditValue(v); editValueRef.current = v }
                             }}
-                            onBlur={() => { if (!isNew) commitEdit(p, col.key, editValue) }}
+                            onBlur={() => { if (!isNew) doCommit(p, col.key, editValueRef.current) }}
                             onKeyDown={e => {
                               if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); (e.target as HTMLElement).blur() }
                               if (e.key === 'Escape') { setEditCell(null) }
@@ -227,17 +322,25 @@ export default function ProductSheet({
                     )
                   })}
 
+                  {/* Actions */}
                   <td className="actions-cell">
                     <div className="cell-inner" style={{ gap: 2 }}>
                       {isNew ? (
                         <>
-                          <button className="btn-icon" style={{ color: 'var(--accent)' }} onClick={savePending} title="Save">✓</button>
-                          <button className="btn-icon" style={{ color: 'var(--red)' }} onClick={() => setPendingNew(null)} title="Cancel">✕</button>
+                          <button
+                            className="btn-icon"
+                            style={{ color: 'var(--accent)', fontWeight: 600 }}
+                            onClick={savePending}
+                            disabled={saving === 'new'}
+                            title="Save new product">
+                            {saving === 'new' ? '⟳' : '✓ Save'}
+                          </button>
+                          <button className="btn-icon" style={{ color: 'var(--red)' }} onClick={() => { setPendingNew(null); setSaveError(null) }} title="Cancel">✕</button>
                         </>
                       ) : (
                         <>
                           {isDupe && <button className="btn-icon" style={{ color: 'var(--orange)', fontSize: 11 }} title="Duplicate SKU">⚠️</button>}
-                          <button className="btn-icon" title="History" onClick={() => { setSupplierPanelSku(p.sku_id) }}>📋</button>
+                          <button className="btn-icon" title="Suppliers & History" onClick={() => setSupplierPanelSku(p.sku_id)}>📋</button>
                           <button className="btn-icon" onClick={() => {
                             const dup = { ...p, id: undefined, sku_id: '', product_name: (p.product_name || '') + ' (copy)', upc: '' }
                             setPendingNew(dup)
@@ -252,8 +355,22 @@ export default function ProductSheet({
             })}
           </tbody>
         </table>
-        <div className="add-row-trigger" onClick={addNewRow}>＋ Add row</div>
+
+        {/* Add row footer */}
+        <div className="add-row-trigger" onClick={() => { setSaveError(null); addNewRow() }}>＋ Add row</div>
       </div>
+
+      {/* New product instructions banner */}
+      {pendingNew && (
+        <div style={{
+          position: 'sticky', bottom: 0, background: 'var(--accent-light)',
+          borderTop: '1px solid rgba(26,107,60,.2)', padding: '8px 16px',
+          fontSize: 12, color: 'var(--accent)', display: 'flex', gap: 16, alignItems: 'center', zIndex: 8
+        }}>
+          <span>✦ New row — fill in the cells above, then click <strong>✓ Save</strong> in the actions column to save</span>
+          <span style={{ color: 'var(--text3)' }}>SKU ID is required</span>
+        </div>
+      )}
 
       {/* Supplier + History panel */}
       {supplierPanelSku && panelProduct && (
@@ -268,6 +385,26 @@ export default function ProductSheet({
           onClose={() => setSupplierPanelSku(null)}
         />
       )}
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
     </>
   )
+
+  function addNewRow() {
+    const p: Product = {
+      status: 'Active',
+      brand: brandFilter || BRANDS[0].name,
+      category: '', product_name: '', sku_id: '',
+      prod_dim_unit: 'In', prod_weight_unit: 'Lb',
+      pkg_dim_unit: 'In',  pkg_weight_unit: 'Lb',
+      carton_unit: 'In',   carton_weight_unit: 'Lb',
+      discontinued: false,
+    }
+    setPendingNew(p)
+    // Scroll to top to see the new row
+    setTimeout(() => {
+      const newRow = document.querySelector('.new-row')
+      newRow?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 100)
+  }
 }
