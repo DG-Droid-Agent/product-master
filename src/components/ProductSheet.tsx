@@ -48,10 +48,30 @@ export default function ProductSheet({
   const [supplierPanelSku, setSupplierPanelSku] = useState<string | null>(null)
   const [saving, setSaving]           = useState<string | null>(null) // sku being saved
   const [saveError, setSaveError]     = useState<string | null>(null)
+  const [colWidths, setColWidths]     = useState<Record<string, number>>({})
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
+  const resizeRef = useRef<{ key: string; startX: number; startW: number } | null>(null)
 
   // Track pending edit value via ref so onBlur always has latest value
   const editValueRef = useRef('')
+
+  function startColResize(e: React.MouseEvent, key: string, currentWidth: number) {
+    e.preventDefault()
+    resizeRef.current = { key, startX: e.clientX, startW: currentWidth }
+    const onMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return
+      const delta = ev.clientX - resizeRef.current.startX
+      const newW = Math.max(60, resizeRef.current.startW + delta)
+      setColWidths(prev => ({ ...prev, [resizeRef.current!.key]: newW }))
+    }
+    const onUp = () => {
+      resizeRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
 
   function suppliersForSku(skuId: string) {
     return suppliers.filter(s => s.sku_id === skuId)
@@ -143,8 +163,18 @@ export default function ProductSheet({
         <table className="sheet-table">
           <thead>
             <tr>
-              <th>#</th>
-              {COLS.map(c => <th key={c.key} style={{ minWidth: c.width }}>{c.label}</th>)}
+              <th style={{ width: 36, minWidth: 36 }}>#</th>
+              {COLS.map(c => (
+                <th key={c.key} style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, position: 'relative' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                    <span>{c.label}</span>
+                    <span
+                      style={{ width: 4, cursor: 'col-resize', padding: '0 2px', color: 'var(--border2)', userSelect: 'none', flexShrink: 0 }}
+                      onMouseDown={e => startColResize(e, c.key, colWidths[c.key] ?? c.width)}
+                      title="Drag to resize">⋮</span>
+                  </div>
+                </th>
+              ))}
               <th className="col-actions">⋯</th>
             </tr>
           </thead>
@@ -308,13 +338,21 @@ export default function ProductSheet({
                       )
                     }
 
+                    // Yellow background for empty important fields
+                    const isEmpty = !val || val === 'nan' || val === ''
+                    const isImportantEmpty = isEmpty && ['product_name','sku_id','upc','asin','brand','category'].includes(col.key)
                     return (
-                      <td key={col.key} onClick={() => p.id && startEdit(p, col.key)} title={val}>
+                      <td key={col.key}
+                        onClick={() => p.id && startEdit(p, col.key)}
+                        title={val}
+                        style={isImportantEmpty ? { background: '#fffbea' } : undefined}>
                         <div className="cell-inner">
                           {col.key === 'status'
                             ? statusBadge(p)
                             : col.key === 'brand'
-                            ? <span className="cell-text" style={{ color: brandColor(val) }}>{val}</span>
+                            ? <span className="cell-text" style={{ color: brandColor(val) }}>{val || <span style={{color:'#c9a800',fontSize:10}}>⚠ missing</span>}</span>
+                            : isImportantEmpty
+                            ? <span style={{ fontSize: 10, color: '#c9a800', fontStyle: 'italic' }}>empty</span>
                             : <span className={`cell-text ${col.mono ? 'mono' : ''}`}>{val}</span>
                           }
                         </div>
