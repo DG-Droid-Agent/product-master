@@ -165,7 +165,7 @@ export default function ProductSheet({
             <tr>
               <th style={{ width: 36, minWidth: 36 }}>#</th>
               {COLS.map(c => (
-                <th key={c.key} style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, position: 'relative' }}>
+                <th key={c.key} style={{ minWidth: colWidths[c.key] ?? c.width, width: colWidths[c.key] ?? c.width, maxWidth: colWidths[c.key] ?? c.width, position: 'relative', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
                     <span>{c.label}</span>
                     <span
@@ -345,15 +345,19 @@ export default function ProductSheet({
                       <td key={col.key}
                         onClick={() => p.id && startEdit(p, col.key)}
                         title={val}
-                        style={isImportantEmpty ? { background: '#fffbea' } : undefined}>
-                        <div className="cell-inner">
+                        style={{
+                          maxWidth: colWidths[col.key] ?? col.width,
+                          overflow: 'hidden',
+                          ...(isImportantEmpty ? { background: '#fffbea' } : {})
+                        }}>
+                        <div className="cell-inner" style={{ overflow: 'hidden' }}>
                           {col.key === 'status'
                             ? statusBadge(p)
                             : col.key === 'brand'
                             ? <span className="cell-text" style={{ color: brandColor(val) }}>{val || <span style={{color:'#c9a800',fontSize:10}}>⚠ missing</span>}</span>
                             : isImportantEmpty
                             ? <span style={{ fontSize: 10, color: '#c9a800', fontStyle: 'italic' }}>empty</span>
-                            : <span className={`cell-text ${col.mono ? 'mono' : ''}`}>{val}</span>
+                            : <span className={`cell-text ${col.mono ? 'mono' : ''}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: '100%' }}>{val}</span>
                           }
                         </div>
                       </td>
