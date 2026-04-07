@@ -11,7 +11,7 @@ const POOL_TO_BRANDS: Record<string, string[]> = {
   'Eco Living & Fine Living Co.': ['Eco Living', 'The Fine Living Company'],
   'Kesol':                        ['Kesol'],
   'ZERO JET LAG':                 ['ZERO JET LAG'],
-  'GS1_850033042':                ['The Fine Living Company', 'Well Lean'],
+  'GS1_850033042':                ['Well Lean'],  // Fine Living uses 5061020 pool above
 }
 
 type UpcStatus = 'verified' | 'duplicate' | 'free'
@@ -24,6 +24,7 @@ export default function UpcManager({ products, onRefresh }: { products: Product[
   const [assigning, setAssigning]     = useState<{ brand: string; upc: string } | null>(null)
   const [assignSku, setAssignSku]     = useState('')
   const [saving, setSaving]           = useState(false)
+  const [expandedCandidates, setExpandedCandidates] = useState<Record<string, boolean>>({})
   const [upcSearch, setUpcSearch]     = useState<Record<string, string>>({})
 
   useEffect(() => { loadAssignments() }, [products])
@@ -238,15 +239,26 @@ export default function UpcManager({ products, onRefresh }: { products: Product[
                 <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--text3)', marginBottom: 6 }}>
                   {candidates.length} product{candidates.length !== 1 ? 's' : ''} needing UPC
                 </div>
-                {candidates.slice(0, 5).map(p => (
+                {candidates.slice(0, expandedCandidates[brand] ? candidates.length : 5).map(p => (
                   <div key={p.sku_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 11, color: 'var(--text2)' }}>
                     <span style={{ color: 'var(--orange)' }}>●</span>
                     <span style={{ fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{p.sku_id}</span>
                     <span style={{ color: 'var(--text3)', fontSize: 10 }}>{p.brand}</span>
                   </div>
                 ))}
-                {candidates.length > 5 && (
-                  <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>+{candidates.length - 5} more</div>
+                {candidates.length > 5 && !expandedCandidates[brand] && (
+                  <div
+                    onClick={() => setExpandedCandidates(prev => ({ ...prev, [brand]: true }))}
+                    style={{ fontSize: 11, color: 'var(--accent)', marginTop: 4, cursor: 'pointer', fontWeight: 500 }}>
+                    ▼ +{candidates.length - 5} more
+                  </div>
+                )}
+                {candidates.length > 5 && expandedCandidates[brand] && (
+                  <div
+                    onClick={() => setExpandedCandidates(prev => ({ ...prev, [brand]: false }))}
+                    style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4, cursor: 'pointer' }}>
+                    ▲ Show less
+                  </div>
                 )}
               </div>
             )}
