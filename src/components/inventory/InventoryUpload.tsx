@@ -160,7 +160,7 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
 
     // ── Build and save velocity rows (from FBA sales data) ────────────────
     const teamPushByAsin: Record<string, number> = {}
-    asinUpserts.forEach(a => { teamPushByAsin[a.asin] = a.team_push_multiplier })
+    asinUpserts.forEach(a => { if (a.asin) teamPushByAsin[a.asin] = a.team_push_multiplier })
 
     const velRows = buildVelocityRows(fbaRows, orgId, teamPushByAsin)
 
