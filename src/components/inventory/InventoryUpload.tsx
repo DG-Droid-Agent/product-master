@@ -1,23 +1,22 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { createClient } from '@/lib/supabase'
 import {
-  parseCsv, detectReportType, parseFbaInventory, parseAwdInventory,
+  parseCsv, detectReportType, parseFbaInventory, parseManageFbaInventory,
+  parseAwdInventory, parseReservedInventory,
   calcTrueInventory, calcBaseVelocity, calcFinalVelocity, calcPlanning,
   type InventorySnapshot, type SalesVelocity, type PlanningOutput
 } from '@/lib/inventory'
 
 type UploadedFile = {
   name: string
-  type: 'fba_inventory' | 'awd_inventory' | 'sales_report' | 'unknown'
+  type: 'fba_inventory' | 'manage_fba' | 'awd_inventory' | 'reserved_inventory' | 'unknown'
   rows: number
   status: 'pending' | 'processing' | 'done' | 'error'
   error?: string
   data?: any
 }
-
-type SalesPeriod = 7 | 30 | 60 | 90
 
 export default function InventoryUpload({ orgId, userEmail, onComplete }: {
   orgId: string
@@ -32,7 +31,6 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
   const [result, setResult] = useState<{ asins: number; message: string } | null>(null)
 
   const handleFiles = useCallback((fileList: FileList) => {
-    const newFiles: UploadedFile[] = []
     Array.from(fileList).forEach(file => {
       if (!file.name.endsWith('.csv') && !file.name.endsWith('.txt') && !file.name.endsWith('.tsv')) return
       const reader = new FileReader()
@@ -69,56 +67,68 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
   async function processAll() {
     if (!orgId) { alert('No org found — check Supabase setup'); return }
     if (files.length === 0) { alert('Add files first'); return }
+
     setProcessing(true)
     setResult(null)
 
-    const fbaFile = files.find(f => f.type === 'fba_inventory')
-    const awdFile = files.find(f => f.type === 'awd_inventory')
+    // Find each file type
+    const fbaFile      = files.find(f => f.type === 'fba_inventory')
+    const manageFbaFile = files.find(f => f.type === 'manage_fba')
+    const awdFile      = files.find(f => f.type === 'awd_inventory')
+    const reservedFile = files.find(f => f.type === 'reserved_inventory')
 
-    // Parse FBA data
+    // ── Parse FBA (sales velocity + inbound + inv age) ──
     const fbaData: Record<string, Partial<InventorySnapshot>> = {}
     if (fbaFile?.data) {
       const parsed = parseFbaInventory(fbaFile.data.rows)
       parsed.forEach(p => { if (p.asin) fbaData[p.asin] = p })
     }
 
-    // Parse AWD data
+    // ── Parse Manage FBA (fulfillable + warehouse quantities) ──
+    const manageFbaData: Record<string, Partial<InventorySnapshot>> = {}
+    if (manageFbaFile?.data) {
+      const parsed = parseManageFbaInventory(manageFbaFile.data.rows)
+      parsed.forEach(p => { if (p.asin) manageFbaData[p.asin] = p })
+    }
+
+    // ── Parse AWD (buffer stock) ──
     const awdData: Record<string, Partial<InventorySnapshot>> = {}
     if (awdFile?.data) {
       const parsed = parseAwdInventory(awdFile.data.rows)
       parsed.forEach(p => { if (p.asin) awdData[p.asin] = p })
     }
 
-    // Merge all ASINs
-    const allAsins = new Set([...Object.keys(fbaData), ...Object.keys(awdData)])
+    // ── Parse Reserved (customer orders to exclude) ──
+    const reservedData: Record<string, Partial<InventorySnapshot>> = {}
+    if (reservedFile?.data) {
+      const parsed = parseReservedInventory(reservedFile.data.rows)
+      parsed.forEach(p => { if (p.asin) reservedData[p.asin] = p })
+    }
+
+    // Merge all ASINs across all files
+    const allAsins = new Set([
+      ...Object.keys(fbaData),
+      ...Object.keys(manageFbaData),
+      ...Object.keys(awdData),
+      ...Object.keys(reservedData),
+    ])
+
     if (allAsins.size === 0) {
       setProcessing(false)
       setResult({ asins: 0, message: 'No ASINs found. Check your file format.' })
       return
     }
 
-    // Get existing ASIN records from DB
-    const { data: existingAsins } = await supabase
-      .from('asins')
-      .select('*')
-      .eq('org_id', orgId)
-
+    // Get existing ASIN records + product master + suppliers
+    const { data: existingAsins } = await supabase.from('asins').select('*').eq('org_id', orgId)
     const asinMap: Record<string, any> = {}
     existingAsins?.forEach(a => { asinMap[a.asin] = a })
 
-    // Get product master data for enrichment
-    const { data: products } = await supabase
-      .from('products')
-      .select('sku_id, product_name, brand, category, asin, cbm')
-
+    const { data: products } = await supabase.from('products').select('sku_id, product_name, brand, category, asin, cbm')
     const productByAsin: Record<string, any> = {}
     products?.forEach(p => { if (p.asin) productByAsin[p.asin] = p })
 
-    // Get supplier costs
-    const { data: suppliers } = await supabase
-      .from('suppliers')
-      .select('sku_id, usd_per_unit, cbm, carton_qty, is_active')
-
+    const { data: suppliers } = await supabase.from('suppliers').select('sku_id, usd_per_unit, cbm, carton_qty, is_active')
     const supplierBySkuId: Record<string, any> = {}
     suppliers?.forEach(s => { if (s.is_active || !supplierBySkuId[s.sku_id]) supplierBySkuId[s.sku_id] = s })
 
@@ -126,47 +136,91 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
     const asinUpserts: any[] = []
 
     for (const asin of allAsins) {
-      const fba = fbaData[asin] ?? {}
-      const awd = awdData[asin] ?? {}
-      const product = productByAsin[asin]
+      const fba      = fbaData[asin]      ?? {}
+      const mfba     = manageFbaData[asin] ?? {}
+      const awd      = awdData[asin]      ?? {}
+      const reserved = reservedData[asin]  ?? {}
+      const product  = productByAsin[asin]
       const existingAsin = asinMap[asin]
+
+      // ── TRUE INVENTORY POSITION ──
+      // Use Manage FBA for fulfillable quantity (more accurate)
+      // Use FBA report for inbound details + velocity
+      // Use Reserved report for customer orders (already sold — exclude from coverage)
+      // Use AWD for buffer stock
+      const fba_fulfillable           = (mfba.fba_fulfillable          ?? fba.fba_fulfillable          ?? 0) as number
+      const fba_warehouse             = (mfba.fba_warehouse_qty         ?? fba.fba_fulfillable          ?? 0) as number
+      const fba_unfulfillable         = (mfba.fba_unfulfillable         ?? fba.fba_unfulfillable         ?? 0) as number
+      const fba_inbound_working       = (fba.fba_inbound_working        ?? 0) as number
+      const fba_inbound_shipped       = (fba.fba_inbound_shipped        ?? 0) as number
+      const fba_inbound_receiving     = (fba.fba_inbound_receiving      ?? 0) as number
+      const fba_reserved_cust_orders  = (reserved.fba_reserved_customer_orders ?? fba.fba_reserved_customer_orders ?? 0) as number
+      const fba_reserved_fc_transfer  = (reserved.fba_reserved_fc_transfer     ?? fba.fba_reserved_fc_transfer     ?? 0) as number
+      const fba_reserved_fc_processing = (reserved.fba_reserved_fc_processing  ?? 0) as number
+      const awd_available             = (awd.awd_available              ?? 0) as number
+      const awd_inbound               = (awd.awd_inbound                ?? 0) as number
+      const awd_outbound_to_fba       = (awd.awd_outbound_to_fba        ?? 0) as number
+
+      // True inventory = what we can count for coverage planning
+      // EXCLUDES: unfulfillable, customer orders (already sold)
+      // INCLUDES: fulfillable + inbound shipped/receiving + AWD available + AWD inbound + AWD→FBA outbound
+      const true_inventory_units = calcTrueInventory({
+        fba_fulfillable,
+        fba_unfulfillable,
+        fba_inbound_shipped,
+        fba_inbound_receiving,
+        fba_reserved_customer_orders: fba_reserved_cust_orders,
+        awd_available,
+        awd_inbound,
+        awd_outbound_to_fba,
+      })
 
       const snap: any = {
         org_id: orgId,
         snapshot_date: snapshotDate,
         asin,
-        sku_id: fba.sku_id || existingAsin?.sku_id || product?.sku_id || '',
-        product_name: fba.product_name || existingAsin?.product_name || product?.product_name || '',
-        fba_fulfillable: fba.fba_fulfillable ?? 0,
-        fba_unfulfillable: fba.fba_unfulfillable ?? 0,
-        fba_inbound_working: fba.fba_inbound_working ?? 0,
-        fba_inbound_shipped: fba.fba_inbound_shipped ?? 0,
-        fba_inbound_receiving: fba.fba_inbound_receiving ?? 0,
-        fba_reserved_customer_orders: fba.fba_reserved_customer_orders ?? 0,
-        fba_reserved_fc_transfer: fba.fba_reserved_fc_transfer ?? 0,
-        fba_reserved_fc_processing: 0,
-        awd_available: awd.awd_available ?? 0,
-        awd_inbound: awd.awd_inbound ?? 0,
-        awd_outbound_to_fba: awd.awd_outbound_to_fba ?? 0,
-        true_inventory_units: calcTrueInventory({ ...fba, ...awd }),
+        sku_id:        fba.sku_id || existingAsin?.sku_id || product?.sku_id || '',
+        product_name:  fba.product_name || existingAsin?.product_name || product?.product_name || '',
+        // FBA position
+        fba_fulfillable,
+        fba_warehouse_qty:        fba_warehouse,
+        fba_unfulfillable,
+        fba_inbound_working,
+        fba_inbound_shipped,
+        fba_inbound_receiving,
+        // Reserved breakdown (from Reserve report)
+        fba_reserved_customer_orders:  fba_reserved_cust_orders,
+        fba_reserved_fc_transfer,
+        fba_reserved_fc_processing,
+        // AWD position
+        awd_available,
+        awd_inbound,
+        awd_outbound_to_fba,
+        // Sales velocity (from FBA report)
+        units_7d:  fba.units_7d  ?? 0,
+        units_30d: fba.units_30d ?? 0,
+        units_60d: fba.units_60d ?? 0,
+        units_90d: fba.units_90d ?? 0,
+        // Computed
+        true_inventory_units,
       }
+
       snapshots.push(snap)
 
-      // Upsert ASIN record
       asinUpserts.push({
         org_id: orgId,
         asin,
-        sku_id: snap.sku_id,
+        sku_id:       snap.sku_id,
         product_name: snap.product_name,
-        brand: existingAsin?.brand || product?.brand || '',
-        category: existingAsin?.category || product?.category || '',
-        lead_time_manufacturing: existingAsin?.lead_time_manufacturing ?? 40,
-        lead_time_shipping_awd: existingAsin?.lead_time_shipping_awd ?? 30,
-        lead_time_awd_to_fba: existingAsin?.lead_time_awd_to_fba ?? 14,
-        target_coverage_days: existingAsin?.target_coverage_days ?? 150,
-        fba_buffer_days: existingAsin?.fba_buffer_days ?? 30,
-        team_push_multiplier: existingAsin?.team_push_multiplier ?? 1.0,
-        team_push_notes: existingAsin?.team_push_notes ?? '',
+        brand:        existingAsin?.brand    || product?.brand    || '',
+        category:     existingAsin?.category || product?.category || '',
+        lead_time_manufacturing:  existingAsin?.lead_time_manufacturing  ?? 40,
+        lead_time_shipping_awd:   existingAsin?.lead_time_shipping_awd   ?? 30,
+        lead_time_awd_to_fba:     existingAsin?.lead_time_awd_to_fba     ?? 14,
+        target_coverage_days:     existingAsin?.target_coverage_days     ?? 150,
+        fba_buffer_days:          existingAsin?.fba_buffer_days          ?? 30,
+        team_push_multiplier:     existingAsin?.team_push_multiplier     ?? 1.0,
+        team_push_notes:          existingAsin?.team_push_notes          ?? '',
         keyword_1: existingAsin?.keyword_1 ?? '',
         keyword_2: existingAsin?.keyword_2 ?? '',
         is_active: true,
@@ -174,7 +228,7 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
       })
     }
 
-    // Save snapshots
+    // ── Save snapshots ──
     const { error: snapError } = await supabase
       .from('inventory_snapshots')
       .upsert(snapshots, { onConflict: 'org_id,asin,snapshot_date' })
@@ -185,61 +239,73 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
       return
     }
 
-    // Upsert ASINs
+    // ── Upsert ASINs ──
     await supabase.from('asins').upsert(asinUpserts, { onConflict: 'org_id,asin' })
 
-    // Generate placeholder velocity if not provided
-    // (real velocity comes from sales report upload)
+    // ── Upsert velocity (from FBA sales data) ──
     const { data: existingVel } = await supabase
       .from('sales_velocity')
       .select('asin')
       .eq('org_id', orgId)
       .eq('snapshot_date', snapshotDate)
-
     const existingVelAsins = new Set(existingVel?.map(v => v.asin) ?? [])
-    const velInserts: any[] = []
 
+    const velUpserts: any[] = []
     for (const snap of snapshots) {
-      if (existingVelAsins.has(snap.asin)) continue
-      // Get team push from asin record
-      const asinRec = asinUpserts.find(a => a.asin === snap.asin)
+      const asinRec  = asinUpserts.find(a => a.asin === snap.asin)
       const teamPush = asinRec?.team_push_multiplier ?? 1.0
-      // Placeholder velocity — will be updated when sales report uploaded
-      velInserts.push({
+      const existing = existingVelAsins.has(snap.asin)
+
+      // Only create velocity record if FBA file was uploaded (has real sales data)
+      // If no FBA file, preserve existing velocity
+      if (!fbaFile && existing) continue
+
+      const v7  = (snap.units_7d  ?? 0) / 7
+      const v30 = (snap.units_30d ?? 0) / 30
+      const v60 = (snap.units_60d ?? 0) / 60
+      const v90 = (snap.units_90d ?? 0) / 90
+      const baseVel = calcBaseVelocity(v7, v30, v60, v90)
+      const finalVel = calcFinalVelocity(baseVel, 1.0, 1.0, teamPush)
+
+      velUpserts.push({
         org_id: orgId,
         asin: snap.asin,
         snapshot_date: snapshotDate,
-        units_7d: 0, units_30d: 0, units_60d: 0, units_90d: 0,
-        velocity_7d: 0, velocity_30d: 0, velocity_60d: 0, velocity_90d: 0,
-        base_velocity: 0,
-        seasonality_multiplier: 1.0,
-        search_trend_multiplier: 1.0,
-        team_push_multiplier: teamPush,
-        final_velocity: 0,
+        units_7d:  snap.units_7d  ?? 0,
+        units_30d: snap.units_30d ?? 0,
+        units_60d: snap.units_60d ?? 0,
+        units_90d: snap.units_90d ?? 0,
+        velocity_7d:  v7,
+        velocity_30d: v30,
+        velocity_60d: v60,
+        velocity_90d: v90,
+        base_velocity: baseVel,
+        seasonality_multiplier:   1.0,
+        search_trend_multiplier:  1.0,
+        team_push_multiplier:     teamPush,
+        final_velocity:           finalVel,
       })
     }
 
-    if (velInserts.length > 0) {
-      await supabase.from('sales_velocity').upsert(velInserts, { onConflict: 'org_id,asin,snapshot_date' })
+    if (velUpserts.length > 0) {
+      await supabase.from('sales_velocity').upsert(velUpserts, { onConflict: 'org_id,asin,snapshot_date' })
     }
 
-    // Generate planning output
+    // ── Generate planning output ──
     const planInserts: any[] = []
     for (const snap of snapshots) {
       const asinRec = asinUpserts.find(a => a.asin === snap.asin)
       if (!asinRec) continue
+
       const { data: velRec } = await supabase
-        .from('sales_velocity')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('asin', snap.asin)
-        .eq('snapshot_date', snapshotDate)
+        .from('sales_velocity').select('*')
+        .eq('org_id', orgId).eq('asin', snap.asin).eq('snapshot_date', snapshotDate)
         .single()
 
-      const finalVel = velRec?.final_velocity ?? 0
-      const skuId = snap.sku_id
-      const supplier = skuId ? supplierBySkuId[skuId] : null
-      const unitCost = supplier?.usd_per_unit ?? 0
+      const finalVel  = velRec?.final_velocity ?? 0
+      const skuId     = snap.sku_id
+      const supplier  = skuId ? supplierBySkuId[skuId] : null
+      const unitCost  = supplier?.usd_per_unit ?? 0
       const cbmPerUnit = supplier && supplier.carton_qty > 0 ? (supplier.cbm / supplier.carton_qty) : 0
 
       const planCalc = calcPlanning(asinRec, snap.true_inventory_units, finalVel, unitCost, cbmPerUnit)
@@ -250,7 +316,7 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
       await supabase.from('planning_output').upsert(planInserts, { onConflict: 'org_id,asin,snapshot_date' })
     }
 
-    // Log upload
+    // ── Log upload ──
     await supabase.from('upload_log').insert({
       org_id: orgId,
       uploaded_by: userEmail,
@@ -267,11 +333,18 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
   }
 
   const typeLabels: Record<string, string> = {
-    fba_inventory: '📦 FBA Inventory',
-    awd_inventory: '🏭 AWD Inventory',
-    sales_report: '📈 Sales Report',
-    unknown: '❓ Unknown',
+    fba_inventory:      '📊 FBA Report (velocity + inbound)',
+    manage_fba:         '📦 Manage FBA (fulfillable qty)',
+    awd_inventory:      '🏭 AWD Inventory',
+    reserved_inventory: '🔒 Reserved Inventory',
+    unknown:            '❓ Unknown',
   }
+
+  // Check which required files are present
+  const hasManageFba = files.some(f => f.type === 'manage_fba')
+  const hasFba       = files.some(f => f.type === 'fba_inventory')
+  const hasAwd       = files.some(f => f.type === 'awd_inventory')
+  const hasReserved  = files.some(f => f.type === 'reserved_inventory')
 
   return (
     <div style={{ padding: 24, maxWidth: 800 }}>
@@ -284,12 +357,51 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
 
       {/* Instructions */}
       <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 12, color: 'var(--text2)' }}>
-        <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>📋 Which files to download from Amazon:</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 20px' }}>
-          <div>① <strong>FBA Inventory</strong> — Seller Central → Reports → Fulfilment → Inventory → All Inventory</div>
-          <div>② <strong>AWD Inventory</strong> — Seller Central → Inventory → AWD → Download inventory</div>
+        <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>📋 Download these 4 reports from Amazon:</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 20px' }}>
+          <div>
+            <span style={{ color: hasFba ? 'var(--accent)' : 'var(--text3)' }}>{hasFba ? '✓' : '①'}</span>
+            {' '}<strong>FBA Report</strong> — Reports → Fulfilment → Inventory → All Inventory
+            <div style={{ color: 'var(--text3)', paddingLeft: 16 }}>Sales velocity (7/30/60/90d) + inbound shipments</div>
+          </div>
+          <div>
+            <span style={{ color: hasManageFba ? 'var(--accent)' : 'var(--text3)' }}>{hasManageFba ? '✓' : '②'}</span>
+            {' '}<strong>Manage FBA</strong> — Inventory → Manage FBA Inventory → Download
+            <div style={{ color: 'var(--text3)', paddingLeft: 16 }}>Fulfillable + warehouse quantities (most accurate)</div>
+          </div>
+          <div>
+            <span style={{ color: hasAwd ? 'var(--accent)' : 'var(--text3)' }}>{hasAwd ? '✓' : '③'}</span>
+            {' '}<strong>AWD Inventory</strong> — Inventory → AWD → Download inventory
+            <div style={{ color: 'var(--text3)', paddingLeft: 16 }}>AWD buffer stock + inbound to AWD</div>
+          </div>
+          <div>
+            <span style={{ color: hasReserved ? 'var(--accent)' : 'var(--text3)' }}>{hasReserved ? '✓' : '④'}</span>
+            {' '}<strong>Reserved Inventory</strong> — Reports → Fulfilment → Inventory → Reserved
+            <div style={{ color: 'var(--text3)', paddingLeft: 16 }}>Customer orders already sold (excluded from coverage)</div>
+          </div>
         </div>
       </div>
+
+      {/* Files present indicator */}
+      {files.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          {[
+            { label: 'FBA Report',       has: hasFba,       required: false },
+            { label: 'Manage FBA',       has: hasManageFba, required: true },
+            { label: 'AWD Inventory',    has: hasAwd,       required: false },
+            { label: 'Reserved',         has: hasReserved,  required: false },
+          ].map(item => (
+            <div key={item.label} style={{
+              padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
+              background: item.has ? 'var(--accent-light)' : item.required ? 'var(--orange-light)' : 'var(--surface2)',
+              border: `1px solid ${item.has ? 'rgba(26,107,60,.3)' : item.required ? 'rgba(192,107,0,.3)' : 'var(--border)'}`,
+              color: item.has ? 'var(--accent)' : item.required ? '#c06b00' : 'var(--text3)',
+            }}>
+              {item.has ? '✓' : item.required ? '!' : '○'} {item.label}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Snapshot date */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
@@ -320,9 +432,9 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
           onChange={e => e.target.files && handleFiles(e.target.files)} />
         <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
         <div style={{ fontSize: 14, fontWeight: 500, color: dragging ? 'var(--accent)' : 'var(--text2)', marginBottom: 4 }}>
-          Drop files here or click to browse
+          Drop all 4 files here or click to browse
         </div>
-        <div style={{ fontSize: 12, color: 'var(--text3)' }}>Accepts CSV, TSV, TXT — Amazon report format</div>
+        <div style={{ fontSize: 12, color: 'var(--text3)' }}>Accepts CSV, TSV, TXT — Amazon report format · Auto-detects file type</div>
       </div>
 
       {/* File list */}
@@ -340,11 +452,18 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
               <select
                 value={f.type}
                 onChange={e => overrideType(i, e.target.value as UploadedFile['type'])}
-                style={{ padding: '5px 9px', border: `1px solid ${f.type === 'unknown' ? '#c06b00' : 'var(--border)'}`, borderRadius: 5, fontFamily: 'var(--font)', fontSize: 12, background: f.type === 'unknown' ? 'var(--orange-light)' : 'var(--surface2)', color: 'var(--text)', outline: 'none' }}
+                style={{
+                  padding: '5px 9px',
+                  border: `1px solid ${f.type === 'unknown' ? '#c06b00' : 'var(--border)'}`,
+                  borderRadius: 5, fontFamily: 'var(--font)', fontSize: 12,
+                  background: f.type === 'unknown' ? 'var(--orange-light)' : 'var(--surface2)',
+                  color: 'var(--text)', outline: 'none'
+                }}
               >
-                <option value="fba_inventory">📦 FBA Inventory</option>
+                <option value="fba_inventory">📊 FBA Report (velocity + inbound)</option>
+                <option value="manage_fba">📦 Manage FBA (fulfillable qty)</option>
                 <option value="awd_inventory">🏭 AWD Inventory</option>
-                <option value="sales_report">📈 Sales Report</option>
+                <option value="reserved_inventory">🔒 Reserved Inventory</option>
                 <option value="unknown">❓ Unknown</option>
               </select>
               <button className="btn-icon" style={{ color: 'var(--red)' }} onClick={() => removeFile(i)}>✕</button>
@@ -384,7 +503,6 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
         )}
       </div>
 
-      {/* Upload history */}
       <UploadHistory orgId={orgId} />
     </div>
   )
@@ -418,6 +536,3 @@ function UploadHistory({ orgId }: { orgId: string }) {
     </div>
   )
 }
-
-// Need useEffect for UploadHistory
-import { useEffect } from 'react'
