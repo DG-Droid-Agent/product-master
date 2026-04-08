@@ -34,22 +34,22 @@ export type InventorySnapshot = {
   asin: string
   sku_id?: string
   product_name?: string
-  // FBA position (fulfillable from Manage FBA — most accurate)
+  // FBA position — fulfillable from Manage FBA (most accurate)
   fba_fulfillable: number
-  fba_warehouse_qty: number           // afn-warehouse-quantity (total at Amazon FC)
+  fba_warehouse_qty: number             // afn-warehouse-quantity (total at Amazon FC)
   fba_unfulfillable: number
   fba_inbound_working: number
   fba_inbound_shipped: number
   fba_inbound_receiving: number
-  // Reserved breakdown (from Reserved Inventory report)
+  // Reserved breakdown — from Reserved Inventory report
   fba_reserved_customer_orders: number  // already sold — EXCLUDE from coverage
-  fba_reserved_fc_transfer: number      // moving between FCs — count as available
-  fba_reserved_fc_processing: number    // being processed — count as available
+  fba_reserved_fc_transfer: number      // moving between FCs — available
+  fba_reserved_fc_processing: number    // being processed — available
   // AWD position
   awd_available: number
   awd_inbound: number
   awd_outbound_to_fba: number
-  // Sales data (from FBA report)
+  // Sales data — from FBA report
   units_7d: number
   units_30d: number
   units_60d: number
@@ -141,7 +141,7 @@ export type UploadLog = {
   created_at?: string
 }
 
-// ── COMBINED VIEW (what the dashboard shows per ASIN) ─────────────────────────
+// ── COMBINED VIEW ─────────────────────────────────────────────────────────────
 
 export type InventoryRow = {
   asin: Asin
@@ -153,20 +153,20 @@ export type InventoryRow = {
 // ── PLANNING ENGINE ───────────────────────────────────────────────────────────
 
 export function calcTrueInventory(snap: Partial<InventorySnapshot>): number {
-  // TRUE INVENTORY POSITION — what we count toward 150-day coverage target
+  // TRUE INVENTORY POSITION — what counts toward 150-day coverage target
   //
   // INCLUDE:
-  //   + FBA fulfillable          (selling right now)
-  //   + FBA inbound shipped      (en route to Amazon FC — confirmed dispatched)
-  //   + FBA inbound receiving    (Amazon is processing it now)
-  //   + AWD available            (bulk buffer, will auto-replenish FBA)
+  //   + FBA fulfillable          (selling right now — from Manage FBA)
+  //   + FBA inbound shipped      (en route to Amazon FC)
+  //   + FBA inbound receiving    (Amazon processing now)
+  //   + AWD available            (bulk buffer)
   //   + AWD inbound              (coming into AWD)
   //   + AWD outbound to FBA      (already moving AWD → FBA)
   //
   // EXCLUDE:
-  //   - FBA unfulfillable        (damaged/stranded — cannot be sold)
-  //   - Customer orders          (already sold, leaving stock soon)
-  //   - FBA inbound working      (shipment created but not dispatched yet — not confirmed)
+  //   - FBA unfulfillable        (damaged/stranded)
+  //   - Customer orders          (already sold, leaving soon)
+  //   - FBA inbound working      (not dispatched yet — not confirmed)
 
   const total =
     (snap.fba_fulfillable              ?? 0) +
@@ -180,14 +180,31 @@ export function calcTrueInventory(snap: Partial<InventorySnapshot>): number {
   return Math.max(0, total)
 }
 
+// calcBaseVelocity supports two call signatures:
+//   1. calcBaseVelocity(velocityObject)   — used by InventoryDashboard, VelocityPanel
+//   2. calcBaseVelocity(v7, v30, v60, v90) — used by parsers internally
 export function calcBaseVelocity(
-  v7: number,
-  v30: number,
-  v60: number,
-  v90: number
+  vOrV7: Partial<SalesVelocity> | number,
+  v30?: number,
+  v60?: number,
+  v90?: number
 ): number {
-  // Weighted: 7d×40% + 30d×30% + 60d×20% + 90d×10%
-  return v7 * 0.4 + v30 * 0.3 + v60 * 0.2 + v90 * 0.1
+  let vel7: number, vel30: number, vel60: number, vel90: number
+
+  if (typeof vOrV7 === 'object') {
+    vel7  = vOrV7.velocity_7d  ?? 0
+    vel30 = vOrV7.velocity_30d ?? 0
+    vel60 = vOrV7.velocity_60d ?? 0
+    vel90 = vOrV7.velocity_90d ?? 0
+  } else {
+    vel7  = vOrV7
+    vel30 = v30 ?? 0
+    vel60 = v60 ?? 0
+    vel90 = v90 ?? 0
+  }
+
+  // Weighted average: 7d×40% + 30d×30% + 60d×20% + 90d×10%
+  return vel7 * 0.4 + vel30 * 0.3 + vel60 * 0.2 + vel90 * 0.1
 }
 
 export function calcFinalVelocity(
@@ -200,9 +217,9 @@ export function calcFinalVelocity(
 }
 
 export function calcForwardWindow(
-  leadTimeDays: number,        // mfr + shipping to AWD (default 70)
-  targetCoverage: number,      // default 150
-  currentCoverageDays: number  // current true inventory ÷ velocity
+  leadTimeDays: number,
+  targetCoverage: number,
+  currentCoverageDays: number
 ): number {
   const gap = Math.max(0, targetCoverage - currentCoverageDays)
   return leadTimeDays + gap
@@ -215,15 +232,15 @@ export function calcPlanning(
   unitCostUsd: number,
   cbmPerUnit: number
 ): Omit<PlanningOutput, 'id' | 'org_id' | 'asin' | 'snapshot_date'> {
-  const leadTime = asin.lead_time_manufacturing + asin.lead_time_shipping_awd
-  const target = asin.target_coverage_days
+  const leadTime  = asin.lead_time_manufacturing + asin.lead_time_shipping_awd
+  const target    = asin.target_coverage_days
   const fbaBuffer = asin.fba_buffer_days
 
-  const coverageDays = finalVelocity > 0 ? trueInventory / finalVelocity : 999
-  const gapDays = Math.max(0, target - coverageDays)
+  const coverageDays  = finalVelocity > 0 ? trueInventory / finalVelocity : 999
+  const gapDays       = Math.max(0, target - coverageDays)
   const forwardWindow = calcForwardWindow(leadTime, target, coverageDays)
 
-  const unitsToOrder = Math.max(0, Math.ceil(gapDays * finalVelocity))
+  const unitsToOrder   = Math.max(0, Math.ceil(gapDays * finalVelocity))
   const unitsToSendFba = Math.ceil(finalVelocity * fbaBuffer)
   const unitsToSendAwd = Math.max(0, unitsToOrder - unitsToSendFba)
 
@@ -287,21 +304,21 @@ export function fmtCost(n: number): string {
 // 4 reports, each used for different data:
 //
 //  File 1: FBA Report          → sales velocity (t7/t30/t60/t90) + inbound pipeline
-//  File 2: Manage FBA Report   → fulfillable qty + warehouse qty (more accurate than FBA)
+//  File 2: Manage FBA Report   → fulfillable qty + warehouse qty (more accurate)
 //  File 3: Reserved Inventory  → customer orders + fc-transfers + fc-processing
 //  File 4: AWD Report          → buffer stock + inbound to AWD + outbound to FBA
 
 export type ReportType =
-  | 'fba_inventory'      // Full FBA report — velocity, inbound, age
-  | 'manage_fba'         // Manage FBA — fulfillable, warehouse quantities
-  | 'awd_inventory'      // AWD report — buffer stock
-  | 'reserved_inventory' // Reserved breakdown — customer orders etc.
+  | 'fba_inventory'
+  | 'manage_fba'
+  | 'awd_inventory'
+  | 'reserved_inventory'
   | 'unknown'
 
 export function detectReportType(headers: string[]): ReportType {
   const h = headers.map(x => x.toLowerCase().trim())
 
-  // AWD — unique columns
+  // AWD first — has unique "available in awd" columns
   if (h.some(x =>
     x.includes('available in awd') ||
     x.includes('inbound to awd') ||
@@ -309,13 +326,13 @@ export function detectReportType(headers: string[]): ReportType {
     x.includes('available units in awd')
   )) return 'awd_inventory'
 
-  // Reserved — unique column
+  // Reserved — unique reserved_customerorders column
   if (h.some(x =>
     x.includes('reserved_customerorders') ||
     x.includes('reserved_qty')
   )) return 'reserved_inventory'
 
-  // Manage FBA — has afn-fulfillable-quantity but NOT velocity columns
+  // Manage FBA — has afn-fulfillable but NOT velocity columns
   if (
     h.some(x => x.includes('afn-fulfillable-quantity') || x.includes('afn-warehouse-quantity')) &&
     !h.some(x => x.includes('units-shipped-t7') || x.includes('units-shipped-t30'))
@@ -332,7 +349,7 @@ export function detectReportType(headers: string[]): ReportType {
 
 // ── FILE 1: FBA REPORT PARSER ─────────────────────────────────────────────────
 // Source: Reports → Fulfillment → Amazon Fulfilled Inventory → All Inventory
-// Used for: sales velocity (t7/t30/t60/t90) + inbound shipments + inventory age
+// Used for: sales velocity (t7/t30/t60/t90) + inbound + inventory age
 
 export type FbaReportRow = {
   asin: string
@@ -362,8 +379,8 @@ export function parseFbaReport(rows: Record<string, string>[]): FbaReportRow[] {
     if (!asin) return null
     return {
       asin,
-      sku_id:        r['sku']          || '',
-      product_name:  r['product-name'] || '',
+      sku_id:        r['sku']           || '',
+      product_name:  r['product-name']  || '',
       snapshot_date: r['snapshot-date'] || new Date().toISOString().split('T')[0],
       units_7d:  n(r['units-shipped-t7']),
       units_30d: n(r['units-shipped-t30']),
@@ -372,21 +389,24 @@ export function parseFbaReport(rows: Record<string, string>[]): FbaReportRow[] {
       fba_inbound_working:   n(r['inbound-working']),
       fba_inbound_shipped:   n(r['inbound-shipped']),
       fba_inbound_receiving: n(r['inbound-received']),
-      inv_age_0_90:   n(r['inv-age-0-to-90-days']),
-      inv_age_91_180: n(r['inv-age-91-to-180-days']),
+      inv_age_0_90:    n(r['inv-age-0-to-90-days']),
+      inv_age_91_180:  n(r['inv-age-91-to-180-days']),
       inv_age_181_270: n(r['inv-age-181-to-270-days']),
       inv_age_271_365: n(r['inv-age-271-to-365-days']),
       inv_age_365_plus: n(r['inv-age-366-to-455-days'] || r['inv-age-456-plus-days']),
       estimated_storage_cost: n(r['estimated-storage-cost-next-month']),
-      days_of_supply:  n(r['days-of-supply']),
+      days_of_supply:   n(r['days-of-supply']),
       fba_level_health: r['fba-inventory-level-health-status'] || '',
     }
   }).filter(Boolean) as FbaReportRow[]
 }
 
+// Alias for backward compatibility
+export const parseFbaInventory = parseFbaReport
+
 // ── FILE 2: MANAGE FBA REPORT PARSER ─────────────────────────────────────────
 // Source: Inventory → Manage FBA Inventory → Download
-// Used for: fulfillable quantity + warehouse quantity (MORE ACCURATE than FBA report)
+// Used for: fulfillable qty + warehouse qty — MORE ACCURATE than FBA report
 
 export type ManageFbaRow = {
   asin: string
@@ -395,7 +415,7 @@ export type ManageFbaRow = {
   fba_fulfillable: number       // afn-fulfillable-quantity — sellable right now
   fba_warehouse_total: number   // afn-warehouse-quantity — all stock at Amazon FC
   fba_unfulfillable: number     // afn-unsellable-quantity — damaged/stranded
-  fba_reserved: number          // afn-reserved-quantity — all reserved
+  fba_reserved: number          // afn-reserved-quantity
   fba_inbound_working: number
   fba_inbound_shipped: number
   fba_inbound_receiving: number
@@ -420,9 +440,11 @@ export function parseManageFba(rows: Record<string, string>[]): ManageFbaRow[] {
   }).filter(Boolean) as ManageFbaRow[]
 }
 
+// Alias for backward compatibility
+export const parseManageFbaInventory = parseManageFba
+
 // ── FILE 3: RESERVED INVENTORY REPORT PARSER ─────────────────────────────────
 // Source: Reports → Fulfillment → Reserved Inventory
-// Used for: exact breakdown of why stock is reserved
 // CRITICAL: customer orders must be EXCLUDED from coverage calculation
 
 export type ReservedRow = {
@@ -431,8 +453,8 @@ export type ReservedRow = {
   product_name: string
   reserved_total: number
   reserved_customer_orders: number  // already sold — EXCLUDE from coverage
-  reserved_fc_transfers: number     // moving between FCs — COUNT as available
-  reserved_fc_processing: number    // being processed — COUNT as available
+  reserved_fc_transfers: number     // moving between FCs — count as available
+  reserved_fc_processing: number    // being processed — count as available
 }
 
 export function parseReservedInventory(rows: Record<string, string>[]): ReservedRow[] {
@@ -443,41 +465,37 @@ export function parseReservedInventory(rows: Record<string, string>[]): Reserved
       asin,
       sku_id:       r['sku'] || r['fnsku'] || '',
       product_name: r['product-name'] || '',
-      reserved_total:            n(r['reserved_qty']),
-      reserved_customer_orders:  n(r['reserved_customerorders']),
-      reserved_fc_transfers:     n(r['reserved_fc-transfers']),
-      reserved_fc_processing:    n(r['reserved_fc-processing']),
+      reserved_total:           n(r['reserved_qty']),
+      reserved_customer_orders: n(r['reserved_customerorders']),
+      reserved_fc_transfers:    n(r['reserved_fc-transfers']),
+      reserved_fc_processing:   n(r['reserved_fc-processing']),
     }
   }).filter(Boolean) as ReservedRow[]
 }
 
 // ── FILE 4: AWD INVENTORY REPORT PARSER ──────────────────────────────────────
 // Source: Inventory → AWD → Download report
-// Used for: AWD buffer stock, inbound to AWD, outbound to FBA
-// NOTE: Amazon exports AWD with 2 metadata rows at top — parseCsv handles this
+// NOTE: Amazon exports AWD with 2 metadata rows at top — parseCsv skips them
 
 export type AwdRow = {
   asin: string
   sku_id: string
   product_name: string
-  awd_available: number      // Available in AWD — main buffer stock
-  awd_inbound: number        // Inbound to AWD — coming into buffer
-  awd_outbound_to_fba: number // Outbound to FBA — already moving to FBA
-  awd_reserved: number       // Reserved in AWD
+  awd_available: number        // Available in AWD — main buffer
+  awd_inbound: number          // Inbound to AWD
+  awd_outbound_to_fba: number  // Outbound to FBA
+  awd_reserved: number
   awd_days_of_supply: number
 }
 
 export function parseAwdInventory(rows: Record<string, string>[]): AwdRow[] {
   return rows.map(r => {
-    // AWD report sometimes uses uppercase column names
     const asin = r['asin'] || r['ASIN'] || ''
     if (!asin) return null
-
     return {
       asin,
       sku_id:       r['sku'] || r['SKU'] || '',
       product_name: r['product name'] || r['product-name'] || r['Product Name'] || '',
-      // Available: try multiple column name variants Amazon uses
       awd_available: n(
         r['available in awd (units)'] ||
         r['available units in awd (us)'] ||
@@ -491,15 +509,13 @@ export function parseAwdInventory(rows: Record<string, string>[]): AwdRow[] {
         r['outbound to fba (units)'] ||
         r['awd-outbound']
       ),
-      awd_reserved:      n(r['reserved in awd (units)']),
+      awd_reserved:       n(r['reserved in awd (units)']),
       awd_days_of_supply: n(r['days of supply (days)']),
     }
   }).filter(Boolean) as AwdRow[]
 }
 
 // ── MERGED SNAPSHOT BUILDER ───────────────────────────────────────────────────
-// Combines all 4 parsed reports into a single InventorySnapshot per ASIN
-// Priority: Manage FBA > FBA Report for fulfillable quantities
 
 export function mergeIntoSnapshot(
   snapshotDate: string,
@@ -527,27 +543,22 @@ export function mergeIntoSnapshot(
     const res  = reservedByAsin[asin]
     const awd  = awdByAsin[asin]
 
-    // Fulfillable: Manage FBA is more accurate — use as primary
-    const fba_fulfillable     = mfba?.fba_fulfillable   ?? 0
-    const fba_warehouse_qty   = mfba?.fba_warehouse_total ?? 0
-    const fba_unfulfillable   = mfba?.fba_unfulfillable ?? 0
+    const fba_fulfillable   = mfba?.fba_fulfillable    ?? 0
+    const fba_warehouse_qty = mfba?.fba_warehouse_total ?? 0
+    const fba_unfulfillable = mfba?.fba_unfulfillable  ?? 0
 
-    // Inbound: Manage FBA first, FBA report as fallback
     const fba_inbound_working   = mfba?.fba_inbound_working   ?? fba?.fba_inbound_working   ?? 0
     const fba_inbound_shipped   = mfba?.fba_inbound_shipped   ?? fba?.fba_inbound_shipped   ?? 0
     const fba_inbound_receiving = mfba?.fba_inbound_receiving ?? fba?.fba_inbound_receiving ?? 0
 
-    // Reserved: from Reserved report (most granular breakdown)
     const fba_reserved_customer_orders = res?.reserved_customer_orders ?? 0
     const fba_reserved_fc_transfer     = res?.reserved_fc_transfers    ?? 0
     const fba_reserved_fc_processing   = res?.reserved_fc_processing   ?? 0
 
-    // AWD: from AWD report
-    const awd_available      = awd?.awd_available       ?? 0
-    const awd_inbound        = awd?.awd_inbound         ?? 0
+    const awd_available       = awd?.awd_available       ?? 0
+    const awd_inbound         = awd?.awd_inbound         ?? 0
     const awd_outbound_to_fba = awd?.awd_outbound_to_fba ?? 0
 
-    // Sales velocity data from FBA report
     const units_7d  = fba?.units_7d  ?? 0
     const units_30d = fba?.units_30d ?? 0
     const units_60d = fba?.units_60d ?? 0
@@ -591,7 +602,6 @@ export function mergeIntoSnapshot(
 }
 
 // ── VELOCITY BUILDER ──────────────────────────────────────────────────────────
-// Builds SalesVelocity rows from FBA report t7/t30/t60/t90 data
 
 export function buildVelocityRows(
   fbaRows: FbaReportRow[],
@@ -603,14 +613,14 @@ export function buildVelocityRows(
     const v30 = r.units_30d / 30
     const v60 = r.units_60d / 60
     const v90 = r.units_90d / 90
-    const base = calcBaseVelocity(v7, v30, v60, v90)
-    const teamPush   = teamPushByAsin[r.asin] ?? 1.0
-    const seasonality  = 1.0  // populated later via Brand Analytics
-    const searchTrend  = 1.0  // populated later via Helium 10
+    const base     = calcBaseVelocity(v7, v30, v60, v90)
+    const teamPush = teamPushByAsin[r.asin] ?? 1.0
+    const seasonality  = 1.0
+    const searchTrend  = 1.0
 
     return {
-      org_id:       orgId,
-      asin:         r.asin,
+      org_id:        orgId,
+      asin:          r.asin,
       snapshot_date: r.snapshot_date,
       units_7d:  r.units_7d,
       units_30d: r.units_30d,
@@ -620,18 +630,16 @@ export function buildVelocityRows(
       velocity_30d: parseFloat(v30.toFixed(4)),
       velocity_60d: parseFloat(v60.toFixed(4)),
       velocity_90d: parseFloat(v90.toFixed(4)),
-      base_velocity:          parseFloat(base.toFixed(4)),
-      seasonality_multiplier: seasonality,
+      base_velocity:           parseFloat(base.toFixed(4)),
+      seasonality_multiplier:  seasonality,
       search_trend_multiplier: searchTrend,
-      team_push_multiplier:   teamPush,
+      team_push_multiplier:    teamPush,
       final_velocity: parseFloat(calcFinalVelocity(base, seasonality, searchTrend, teamPush).toFixed(4)),
     }
   })
 }
 
 // ── MASTER UPLOAD HANDLER ─────────────────────────────────────────────────────
-// Pass all uploaded file contents — auto-detects each type, parses, and returns
-// merged snapshots + velocity rows ready to upsert into Supabase
 
 export type UploadResult = {
   snapshots: Partial<InventorySnapshot>[]
@@ -649,10 +657,10 @@ export function processUploadedFiles(
   const errors: string[] = []
   const detectedTypes: Record<string, ReportType> = {}
 
-  let manageFbaRows: ManageFbaRow[]  = []
-  let fbaRows: FbaReportRow[]        = []
-  let reservedRows: ReservedRow[]    = []
-  let awdRows: AwdRow[]              = []
+  let manageFbaRows: ManageFbaRow[] = []
+  let fbaRows: FbaReportRow[]       = []
+  let reservedRows: ReservedRow[]   = []
+  let awdRows: AwdRow[]             = []
 
   for (const file of files) {
     const { headers, rows } = parseCsv(file.content)
@@ -677,13 +685,13 @@ export function processUploadedFiles(
 
 // ── GENERIC CSV PARSER ────────────────────────────────────────────────────────
 // Handles tab and comma delimited files.
-// AWD files have 2 metadata rows at the top (Timestamp, Merchant ID) — skipped automatically.
+// Skips AWD metadata rows (Timestamp, Merchant ID) at top automatically.
 
 export function parseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
   const allLines = text.split('\n').map(l => l.trim()).filter(Boolean)
   if (allLines.length < 2) return { headers: [], rows: [] }
 
-  // Skip AWD metadata rows (Timestamp, Merchant ID) at top
+  // Skip AWD metadata rows
   let startIndex = 0
   for (let i = 0; i < Math.min(5, allLines.length); i++) {
     const line = allLines[i].toLowerCase()
@@ -703,7 +711,6 @@ export function parseCsv(text: string): { headers: string[]; rows: Record<string
   const lines = allLines.slice(startIndex)
   if (lines.length < 2) return { headers: [], rows: [] }
 
-  // Detect delimiter
   const firstLine = lines[0]
   const delimiter = firstLine.includes('\t') ? '\t' : ','
 
