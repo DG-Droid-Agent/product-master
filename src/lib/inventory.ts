@@ -718,8 +718,24 @@ export function parseCsv(text: string): { headers: string[]; rows: Record<string
     .split(delimiter)
     .map(h => h.replace(/^"|"$/g, '').trim().toLowerCase())
 
+ function parseLineRespectingQuotes(line: string, delim: string): string[] {
+    const result: string[] = []
+    let current = ''
+    let inQuotes = false
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i]
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') { current += '"'; i++ }
+        else inQuotes = !inQuotes
+      } else if (char === delim && !inQuotes) {
+        result.push(current.trim()); current = ''
+      } else { current += char }
+    }
+    result.push(current.trim())
+    return result
+  }
   const rows = lines.slice(1).map(line => {
-    const vals = line.split(delimiter).map(v => v.replace(/^"|"$/g, '').trim())
+    const vals = parseLineRespectingQuotes(line, delimiter).map(v => v.replace(/^"|"$/g, '').trim())
     const obj: Record<string, string> = {}
     headers.forEach((h, i) => { obj[h] = vals[i] ?? '' })
     return obj
