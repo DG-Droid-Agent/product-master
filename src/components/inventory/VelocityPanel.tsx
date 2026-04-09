@@ -4,25 +4,32 @@ import { useState } from 'react'
 import type { Asin, SalesVelocity, PlanningOutput } from '@/lib/inventory'
 import { calcFinalVelocity, calcPlanning, statusConfig, fmtDays, fmtUnits } from '@/lib/inventory'
 
+export type VelocitySavePayload = {
+  asin: Asin
+  teamPush: number
+  teamNotes: string
+  seasonality: number
+  searchTrend: number
+}
+
 export default function VelocityPanel({ orgId, asin, velocity, planning, snapshotDate, onSave, onClose }: {
   orgId: string
   asin: Asin
   velocity?: SalesVelocity
   planning?: PlanningOutput
   snapshotDate: string
-  onSave: (updated: Asin) => Promise<void>
+  onSave: (payload: VelocitySavePayload) => Promise<void>
   onClose: () => void
 }) {
-  const [teamPush, setTeamPush] = useState(asin.team_push_multiplier ?? 1.0)
-  const [teamNotes, setTeamNotes] = useState(asin.team_push_notes ?? '')
+  const [teamPush,    setTeamPush]    = useState(asin.team_push_multiplier ?? 1.0)
+  const [teamNotes,   setTeamNotes]   = useState(asin.team_push_notes ?? '')
   const [seasonality, setSeasonality] = useState(velocity?.seasonality_multiplier ?? 1.0)
   const [searchTrend, setSearchTrend] = useState(velocity?.search_trend_multiplier ?? 1.0)
   const [saving, setSaving] = useState(false)
 
-  const baseVel = velocity?.base_velocity ?? 0
+  const baseVel      = velocity?.base_velocity ?? 0
   const previewFinal = calcFinalVelocity(baseVel, seasonality, searchTrend, teamPush)
 
-  // Preview planning with new velocity
   const previewPlan = previewFinal > 0 ? calcPlanning(
     asin,
     planning?.true_inventory_units ?? 0,
@@ -34,16 +41,12 @@ export default function VelocityPanel({ orgId, asin, velocity, planning, snapsho
 
   async function save() {
     setSaving(true)
-    await onSave({
-      ...asin,
-      team_push_multiplier: teamPush,
-      team_push_notes: teamNotes,
-    })
+    await onSave({ asin, teamPush, teamNotes, seasonality, searchTrend })
     setSaving(false)
   }
 
   function MultiplierSlider({ label, description, value, onChange, color }: {
-    label: string; description: string; value: number;
+    label: string; description: string; value: number
     onChange: (v: number) => void; color: string
   }) {
     return (
@@ -57,7 +60,14 @@ export default function VelocityPanel({ orgId, asin, velocity, planning, snapsho
             <input
               type="number" step="0.01" min="0.1" max="5"
               value={value}
-              onChange={e => onChange(Math.max(0.1, Math.min(5, parseFloat(e.target.value) || 1)))}
+              onChange={e => {
+                const v = parseFloat(e.target.value)
+                if (!isNaN(v)) onChange(Math.max(0.1, Math.min(5, v)))
+              }}
+              onBlur={e => {
+                const v = parseFloat(e.target.value)
+                onChange(isNaN(v) ? 1.0 : Math.max(0.1, Math.min(5, v)))
+              }}
               style={{ width: 70, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'var(--mono)', fontSize: 13, textAlign: 'right', background: 'var(--surface2)', color, outline: 'none', fontWeight: 600 }}
             />
             <span style={{ fontSize: 12, color: 'var(--text3)' }}>×</span>
@@ -96,7 +106,7 @@ export default function VelocityPanel({ orgId, asin, velocity, planning, snapsho
             <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text3)', marginBottom: 10 }}>Base Velocity (7/30/60/90 day weighted)</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
               {[
-                { label: '7 day', val: velocity?.velocity_7d ?? 0, weight: '40%' },
+                { label: '7 day',  val: velocity?.velocity_7d  ?? 0, weight: '40%' },
                 { label: '30 day', val: velocity?.velocity_30d ?? 0, weight: '30%' },
                 { label: '60 day', val: velocity?.velocity_60d ?? 0, weight: '20%' },
                 { label: '90 day', val: velocity?.velocity_90d ?? 0, weight: '10%' },
@@ -117,9 +127,22 @@ export default function VelocityPanel({ orgId, asin, velocity, planning, snapsho
           {/* Multipliers */}
           <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--text3)', marginBottom: 14 }}>Velocity Multipliers</div>
 
-          <MultiplierSlider label="S — Seasonality" description="Expected demand vs annual average" value={seasonality} onChange={setSeasonality} color="#1a4a8c" />
-          <MultiplierSlider label="K — Search Trend" description="Keyword volume trend" value={searchTrend} onChange={setSearchTrend} color="#8a6a00" />
+          <MultiplierSlider
+            label="S — Seasonality"
+            description="Expected demand vs annual average"
+            value={seasonality}
+            onChange={setSeasonality}
+            color="#1a4a8c"
+          />
+          <MultiplierSlider
+            label="K — Search Trend"
+            description="Keyword volume trend"
+            value={searchTrend}
+            onChange={setSearchTrend}
+            color="#8a6a00"
+          />
 
+          {/* Team Push */}
           <div style={{ marginBottom: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
               <div>
@@ -127,9 +150,19 @@ export default function VelocityPanel({ orgId, asin, velocity, planning, snapsho
                 <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 8 }}>Strategic investment this period</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input type="number" step="0.05" min="0.1" max="5" value={teamPush}
-                  onChange={e => setTeamPush(Math.max(0.1, Math.min(5, parseFloat(e.target.value) || 1)))}
-                  style={{ width: 70, padding: '4px 8px', border: '1px solid rgba(26,107,60,.4)', borderRadius: 5, fontFamily: 'var(--mono)', fontSize: 13, textAlign: 'right', background: 'var(--accent-light)', color: 'var(--accent)', outline: 'none', fontWeight: 600 }} />
+                <input
+                  type="number" step="0.05" min="0.1" max="5"
+                  value={teamPush}
+                  onChange={e => {
+                    const v = parseFloat(e.target.value)
+                    if (!isNaN(v)) setTeamPush(Math.max(0.1, Math.min(5, v)))
+                  }}
+                  onBlur={e => {
+                    const v = parseFloat(e.target.value)
+                    setTeamPush(isNaN(v) ? 1.0 : Math.max(0.1, Math.min(5, v)))
+                  }}
+                  style={{ width: 70, padding: '4px 8px', border: '1px solid rgba(26,107,60,.4)', borderRadius: 5, fontFamily: 'var(--mono)', fontSize: 13, textAlign: 'right', background: 'var(--accent-light)', color: 'var(--accent)', outline: 'none', fontWeight: 600 }}
+                />
                 <span style={{ fontSize: 12, color: 'var(--text3)' }}>×</span>
               </div>
             </div>
@@ -137,9 +170,12 @@ export default function VelocityPanel({ orgId, asin, velocity, planning, snapsho
               onChange={e => setTeamPush(parseFloat(e.target.value))}
               style={{ width: '100%', accentColor: 'var(--accent)' }} />
             <div style={{ marginTop: 8 }}>
-              <input value={teamNotes} onChange={e => setTeamNotes(e.target.value)}
-                placeholder="Why are you pushing this product? (e.g. Q4 push, launching ads, new variant)"
-                style={{ width: '100%', padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'var(--font)', fontSize: 12, background: 'var(--surface2)', color: 'var(--text)', outline: 'none' }} />
+              <input
+                value={teamNotes}
+                onChange={e => setTeamNotes(e.target.value)}
+                placeholder="Why are you pushing this product? (e.g. Q4 push, launching ads)"
+                style={{ width: '100%', padding: '7px 10px', border: '1px solid var(--border)', borderRadius: 5, fontFamily: 'var(--font)', fontSize: 12, background: 'var(--surface2)', color: 'var(--text)', outline: 'none' }}
+              />
             </div>
           </div>
 
@@ -149,7 +185,7 @@ export default function VelocityPanel({ orgId, asin, velocity, planning, snapsho
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
               {[
                 { label: 'Final Velocity', val: `${previewFinal.toFixed(2)}/day` },
-                { label: 'Coverage', val: fmtDays(previewPlan?.coverage_days ?? planning?.coverage_days ?? 0) },
+                { label: 'Coverage',       val: fmtDays(previewPlan?.coverage_days ?? planning?.coverage_days ?? 0) },
                 { label: 'Units to Order', val: fmtUnits(previewPlan?.units_to_order ?? 0) },
               ].map(item => (
                 <div key={item.label} style={{ textAlign: 'center' }}>
