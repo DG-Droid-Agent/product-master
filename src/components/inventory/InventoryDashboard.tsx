@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import type { Asin, InventorySnapshot, SalesVelocity, PlanningOutput, PurchaseOrder } from '@/lib/inventory'
-import { calcTrueInventory, calcBaseVelocity, calcFinalVelocity, calcPlanning, statusConfig, fmtDays, fmtUnits, fmtCost } from '@/lib/inventory'
+import { calcFinalVelocity, calcPlanning, statusConfig, fmtDays, fmtUnits, fmtCost } from '@/lib/inventory'
 import InventoryUpload from './InventoryUpload'
 import VelocityPanel from './VelocityPanel'
 import PoPlanner from './PoPlanner'
@@ -28,19 +28,19 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    // Get org
+
     const { data: orgs } = await supabase.from('orgs').select('*').limit(1)
     const org = orgs?.[0]
     if (!org) { setLoading(false); return }
     setOrgId(org.id)
 
-    // Get latest snapshot date
     const { data: latestSnap } = await supabase
       .from('inventory_snapshots')
       .select('snapshot_date')
       .eq('org_id', org.id)
       .order('snapshot_date', { ascending: false })
       .limit(1)
+
     const latestDate = latestSnap?.[0]?.snapshot_date ?? new Date().toISOString().split('T')[0]
     setSnapshotDate(latestDate)
 
@@ -68,15 +68,13 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Build combined rows
   const rows = asins.map(a => {
     const snap = snapshots.find(s => s.asin === a.asin)
-    const vel = velocities.find(v => v.asin === a.asin)
+    const vel  = velocities.find(v => v.asin === a.asin)
     const plan = planning.find(p => p.asin === a.asin)
     return { asin: a, snap, vel, plan }
   })
 
-  // Apply filters
   const filtered = rows.filter(r => {
     if (filter !== 'all' && r.plan?.status !== filter) return false
     if (search) {
@@ -86,15 +84,14 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
     return true
   })
 
-  // KPIs
   const kpis = {
-    total: rows.length,
-    critical: rows.filter(r => r.plan?.status === 'critical').length,
-    orderSoon: rows.filter(r => r.plan?.status === 'order_soon').length,
-    watch: rows.filter(r => r.plan?.status === 'watch').length,
+    total:            rows.length,
+    critical:         rows.filter(r => r.plan?.status === 'critical').length,
+    orderSoon:        rows.filter(r => r.plan?.status === 'order_soon').length,
+    watch:            rows.filter(r => r.plan?.status === 'watch').length,
     totalUnitsToOrder: rows.reduce((s, r) => s + (r.plan?.units_to_order ?? 0), 0),
-    totalCost: rows.reduce((s, r) => s + (r.plan?.estimated_cost_usd ?? 0), 0),
-    avgCoverage: rows.length ? rows.reduce((s, r) => s + (r.plan?.coverage_days ?? 0), 0) / rows.length : 0,
+    totalCost:        rows.reduce((s, r) => s + (r.plan?.estimated_cost_usd ?? 0), 0),
+    avgCoverage:      rows.length ? rows.reduce((s, r) => s + (r.plan?.coverage_days ?? 0), 0) / rows.length : 0,
   }
 
   const hasData = snapshots.length > 0 || velocities.length > 0
@@ -110,7 +107,7 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
           { key: 'dashboard', label: '📊 Dashboard' },
           { key: 'upload',    label: '↑ Upload Reports' },
           { key: 'po',        label: `📋 Purchase Orders (${pos.filter(p => p.status === 'draft').length} draft)` },
-        ] as {key: Tab, label: string}[]).map(t => (
+        ] as { key: Tab; label: string }[]).map(t => (
           <div key={t.key} onClick={() => setTab(t.key)} style={{
             padding: '11px 16px', fontSize: 13, cursor: 'pointer',
             borderBottom: `2px solid ${tab === t.key ? 'var(--accent)' : 'transparent'}`,
@@ -132,20 +129,14 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
         {tab === 'dashboard' && (
           <div style={{ padding: 20 }}>
 
-            {/* No data state */}
             {!hasData && (
-              <div style={{
-                background: 'var(--orange-light)', border: '1px solid rgba(192,107,0,.3)',
-                borderRadius: 8, padding: '14px 18px', marginBottom: 20,
-                display: 'flex', alignItems: 'center', gap: 12, fontSize: 13
-              }}>
+              <div style={{ background: 'var(--orange-light)', border: '1px solid rgba(192,107,0,.3)', borderRadius: 8, padding: '14px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12, fontSize: 13 }}>
                 <span style={{ fontSize: 20 }}>📂</span>
                 <div>
                   <strong>No inventory data yet.</strong> Go to{' '}
                   <span style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setTab('upload')}>
                     ↑ Upload Reports
-                  </span>
-                  {' '}to upload your Amazon FBA and AWD reports.
+                  </span>{' '}to upload your Amazon FBA and AWD reports.
                 </div>
               </div>
             )}
@@ -153,18 +144,15 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
             {/* KPI cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
               {[
-                { label: 'Total ASINs',      value: kpis.total,                    color: 'var(--text)',    bg: 'var(--surface)' },
-                { label: 'Critical',         value: kpis.critical,                 color: '#c0392b',        bg: '#fdf0ee' },
-                { label: 'Order Soon',        value: kpis.orderSoon,               color: '#c06b00',        bg: '#fff3e0' },
-                { label: 'Watch',            value: kpis.watch,                    color: '#1a4a8c',        bg: '#eef3fb' },
-                { label: 'Avg Coverage',     value: fmtDays(kpis.avgCoverage),     color: 'var(--accent)',  bg: 'var(--surface)' },
-                { label: 'Units to Order',   value: fmtUnits(kpis.totalUnitsToOrder), color: 'var(--text)', bg: 'var(--surface)' },
-                { label: 'Est. PO Value',    value: fmtCost(kpis.totalCost),       color: 'var(--accent)',  bg: 'var(--surface)' },
+                { label: 'Total ASINs',    value: kpis.total,                          color: 'var(--text)',   bg: 'var(--surface)' },
+                { label: 'Critical',       value: kpis.critical,                       color: '#c0392b',       bg: '#fdf0ee' },
+                { label: 'Order Soon',     value: kpis.orderSoon,                      color: '#c06b00',       bg: '#fff3e0' },
+                { label: 'Watch',          value: kpis.watch,                          color: '#1a4a8c',       bg: '#eef3fb' },
+                { label: 'Avg Coverage',   value: fmtDays(kpis.avgCoverage),           color: 'var(--accent)', bg: 'var(--surface)' },
+                { label: 'Units to Order', value: fmtUnits(kpis.totalUnitsToOrder),    color: 'var(--text)',   bg: 'var(--surface)' },
+                { label: 'Est. PO Value',  value: fmtCost(kpis.totalCost),             color: 'var(--accent)', bg: 'var(--surface)' },
               ].map(k => (
-                <div key={k.label} style={{
-                  background: k.bg, border: '1px solid var(--border)', borderRadius: 8,
-                  padding: '14px 16px',
-                }}>
+                <div key={k.label} style={{ background: k.bg, border: '1px solid var(--border)', borderRadius: 8, padding: '14px 16px' }}>
                   <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--text3)', marginBottom: 6 }}>{k.label}</div>
                   <div style={{ fontSize: 24, fontWeight: 600, color: k.color, fontFamily: 'var(--mono)' }}>{k.value}</div>
                 </div>
@@ -182,7 +170,7 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
                   onChange={e => setSearch(e.target.value)}
                 />
               </div>
-              {(['all','critical','order_soon','watch','healthy'] as Filter[]).map(f => {
+              {(['all', 'critical', 'order_soon', 'watch', 'healthy'] as Filter[]).map(f => {
                 const cfg = f === 'all' ? { label: 'All', color: 'var(--text2)', bg: 'var(--surface2)', border: 'var(--border)' } : statusConfig(f)
                 const isActive = filter === f
                 return (
@@ -200,13 +188,13 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
               <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{filtered.length} ASINs</span>
             </div>
 
-            {/* Inventory table */}
+            {/* Table */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
                   <thead>
                     <tr style={{ background: 'var(--surface3)' }}>
-                      {['Status','Product','ASIN','Brand','FBA','AWD','Total','Coverage','Velocity','Multipliers','To Order','Est. Cost',''].map(h => (
+                      {['Status', 'Product', 'ASIN', 'Brand', 'FBA', 'AWD', 'Total', 'Coverage', 'Velocity', 'Multipliers', 'To Order', 'Est. Cost', ''].map(h => (
                         <th key={h} style={{ padding: '9px 12px', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--text3)', borderBottom: '2px solid var(--border2)', textAlign: 'left', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
                     </tr>
@@ -222,7 +210,6 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
                       const coveragePct = Math.min(100, ((plan?.coverage_days ?? 0) / (a.target_coverage_days)) * 100)
                       const fbaTotal = (snap?.fba_fulfillable ?? 0) + (snap?.fba_inbound_shipped ?? 0) + (snap?.fba_inbound_receiving ?? 0)
                       const awdTotal = (snap?.awd_available ?? 0) + (snap?.awd_inbound ?? 0) + (snap?.awd_outbound_to_fba ?? 0)
-
                       return (
                         <tr key={a.asin} style={{ background: i % 2 === 0 ? 'var(--surface)' : 'var(--surface2)', cursor: 'pointer' }}
                           onClick={() => setSelectedAsin(selectedAsin === a.asin ? null : a.asin)}>
@@ -262,9 +249,9 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
                           <td style={{ padding: '10px 12px' }}>
                             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                               {[
-                                { label: 'S', val: vel?.seasonality_multiplier ?? 1, title: 'Seasonality' },
-                                { label: 'K', val: vel?.search_trend_multiplier ?? 1, title: 'Search Trend' },
-                                { label: 'T', val: a.team_push_multiplier ?? 1, title: 'Team Push' },
+                                { label: 'S', val: vel?.seasonality_multiplier ?? 1,   title: 'Seasonality' },
+                                { label: 'K', val: vel?.search_trend_multiplier ?? 1,  title: 'Search Trend' },
+                                { label: 'T', val: a.team_push_multiplier ?? 1,        title: 'Team Push' },
                               ].map(m => (
                                 <span key={m.label} title={`${m.title}: ${m.val}x`} style={{
                                   fontSize: 10, padding: '1px 5px', borderRadius: 3,
@@ -318,34 +305,73 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
       </div>
 
       {/* Velocity panel overlay */}
-      {selectedAsin && (
-        <VelocityPanel
-          orgId={orgId}
-          asin={asins.find(a => a.asin === selectedAsin)!}
-          velocity={velocities.find(v => v.asin === selectedAsin)}
-          planning={planning.find(p => p.asin === selectedAsin)}
-          snapshotDate={snapshotDate}
-          onSave={async (updated) => {
-            await supabase.from('asins').update({
-              team_push_multiplier: updated.team_push_multiplier,
-              team_push_notes: updated.team_push_notes,
-              team_push_updated_at: new Date().toISOString(),
-            }).eq('org_id', orgId).eq('asin', updated.asin)
-            // Also update velocity record
-            if (velocities.find(v => v.asin === updated.asin)) {
-              const vel = velocities.find(v => v.asin === updated.asin)!
-              const newFinal = calcFinalVelocity(vel.base_velocity, vel.seasonality_multiplier, vel.search_trend_multiplier, updated.team_push_multiplier)
+      {selectedAsin && (() => {
+        const asinRecord = asins.find(a => a.asin === selectedAsin)
+        if (!asinRecord) return null
+        const vel  = velocities.find(v => v.asin === selectedAsin)
+        const snap = snapshots.find(s => s.asin === selectedAsin)
+        const plan = planning.find(p => p.asin === selectedAsin)
+
+        return (
+          <VelocityPanel
+            orgId={orgId}
+            asin={asinRecord}
+            velocity={vel}
+            planning={plan}
+            snapshotDate={snapshotDate}
+            onSave={async (updated) => {
+              // 1. Save team push to asins table
+              await supabase.from('asins').update({
+                team_push_multiplier:  updated.team_push_multiplier,
+                team_push_notes:       updated.team_push_notes,
+                team_push_updated_at:  new Date().toISOString(),
+              }).eq('org_id', orgId).eq('asin', updated.asin)
+
+              // 2. Recalculate final velocity and update sales_velocity
+              const seasonality  = vel?.seasonality_multiplier  ?? 1.0
+              const searchTrend  = vel?.search_trend_multiplier ?? 1.0
+              const baseVelocity = vel?.base_velocity            ?? 0
+              const newFinal     = calcFinalVelocity(baseVelocity, seasonality, searchTrend, updated.team_push_multiplier)
+
               await supabase.from('sales_velocity').update({
                 team_push_multiplier: updated.team_push_multiplier,
-                final_velocity: newFinal,
+                final_velocity:       newFinal,
               }).eq('org_id', orgId).eq('asin', updated.asin).eq('snapshot_date', snapshotDate)
-            }
-            await loadData()
-            setSelectedAsin(null)
-          }}
-          onClose={() => setSelectedAsin(null)}
-        />
-      )}
+
+              // 3. Recalculate planning_output with new velocity
+              if (snap) {
+                const { data: suppliers } = await supabase
+                  .from('suppliers')
+                  .select('sku_id, usd_per_unit, cbm, carton_qty')
+                  .eq('sku_id', updated.sku_id ?? '')
+                  .limit(1)
+
+                const supplier   = suppliers?.[0]
+                const unitCost   = supplier?.usd_per_unit ?? 0
+                const cbmPerUnit = supplier && supplier.carton_qty > 0
+                  ? supplier.cbm / supplier.carton_qty : 0
+
+                const planCalc = calcPlanning(
+                  { ...updated, asin: updated.asin as string },
+                  snap.true_inventory_units ?? 0,
+                  newFinal,
+                  unitCost,
+                  cbmPerUnit
+                )
+
+                await supabase.from('planning_output').upsert(
+                  { org_id: orgId, asin: updated.asin, snapshot_date: snapshotDate, ...planCalc },
+                  { onConflict: 'org_id,asin,snapshot_date' }
+                )
+              }
+
+              await loadData()
+              setSelectedAsin(null)
+            }}
+            onClose={() => setSelectedAsin(null)}
+          />
+        )
+      })()}
     </div>
   )
 }
