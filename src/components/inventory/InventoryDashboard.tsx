@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase'
 import type { Asin, InventorySnapshot, SalesVelocity, PlanningOutput, PurchaseOrder } from '@/lib/inventory'
 import { calcFinalVelocity, calcPlanning, statusConfig, fmtDays, fmtUnits, fmtCost } from '@/lib/inventory'
 import InventoryUpload from './InventoryUpload'
-import VelocityPanel from './VelocityPanel'
+import VelocityPanel, { type VelocitySavePayload } from './VelocityPanel'
 import PoPlanner from './PoPlanner'
 
 type Tab = 'dashboard' | 'upload' | 'po'
@@ -337,26 +337,28 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
             velocity={vel}
             planning={plan}
             snapshotDate={snapshotDate}
-            onSave={async (updated) => {
-              // 1. Save team push multiplier to asins table
+            onSave={async (payload: VelocitySavePayload) => {
+              const { asin: updated, teamPush, teamNotes, seasonality, searchTrend } = payload
+
+              // 1. Save team push to asins table
               await supabase.from('asins').update({
-                team_push_multiplier:  updated.team_push_multiplier,
-                team_push_notes:       updated.team_push_notes,
-                team_push_updated_at:  new Date().toISOString(),
+                team_push_multiplier: teamPush,
+                team_push_notes:      teamNotes,
+                team_push_updated_at: new Date().toISOString(),
               }).eq('org_id', orgId).eq('asin', updated.asin)
 
-              // 2. Recalculate final velocity and save to sales_velocity
-              const seasonality  = vel?.seasonality_multiplier  ?? 1.0
-              const searchTrend  = vel?.search_trend_multiplier ?? 1.0
-              const baseVelocity = vel?.base_velocity            ?? 0
-              const newFinal     = calcFinalVelocity(baseVelocity, seasonality, searchTrend, updated.team_push_multiplier)
+              // 2. Save ALL 3 multipliers + recalculated final velocity to sales_velocity
+              const baseVelocity = vel?.base_velocity ?? 0
+              const newFinal     = calcFinalVelocity(baseVelocity, seasonality, searchTrend, teamPush)
 
               await supabase.from('sales_velocity').update({
-                team_push_multiplier: updated.team_push_multiplier,
-                final_velocity:       newFinal,
+                seasonality_multiplier:  seasonality,
+                search_trend_multiplier: searchTrend,
+                team_push_multiplier:    teamPush,
+                final_velocity:          newFinal,
               }).eq('org_id', orgId).eq('asin', updated.asin).eq('snapshot_date', snapshotDate)
 
-              // 3. Recalculate planning_output with new velocity
+              // 3. Recalculate planning_output with new final velocity
               if (snap) {
                 const { data: suppliers } = await supabase
                   .from('suppliers').select('sku_id, usd_per_unit, cbm, carton_qty')
