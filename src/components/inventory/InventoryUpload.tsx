@@ -163,6 +163,7 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
     asinUpserts.forEach(a => { teamPushByAsin[a.asin] = a.team_push_multiplier })
 
     const velRows = buildVelocityRows(fbaRows, orgId, teamPushByAsin)
+  .map(r => ({ ...r, snapshot_date: snapshotDate }))
 
     if (velRows.length > 0) {
       await supabase
