@@ -372,8 +372,8 @@ export default function PoPlanner({ orgId, userEmail, pos, planningRows, onRefre
                           <tbody>
                             {lines.map((l, i) => (
                               <tr key={l.id} style={{ background: i % 2 === 0 ? 'var(--surface)' : 'var(--surface2)' }}>
-                                <td style={{ padding: '8px 14px', fontSize: 12, width: productCol.width, maxWidth: productCol.width, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                  {l.product_name || '—'}
+                                <td style={{ padding: '8px 14px', fontSize: 12, width: productCol.width, maxWidth: productCol.width, wordBreak: 'break-word' }}>
+                                {l.product_name || '—'}
                                 </td>
                                 <td style={{ padding: '8px 14px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
                                   {l.sku_id || '—'}
