@@ -174,20 +174,15 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
     // ── Generate planning output ──────────────────────────────────────────
     const planInserts: any[] = []
 
-    for (const snap of enrichedSnapshots) {
-      const asinRec = asinUpserts.find(a => a.asin === snap.asin)
-      if (!asinRec) continue
+    // Build velocity lookup from what we just saved — no DB fetch needed
+const velByAsin: Record<string, number> = {}
+velRows.forEach(v => { if (v.asin) velByAsin[v.asin] = v.final_velocity ?? 0 })
 
-      // Get velocity record we just saved
-      const { data: velRec } = await supabase
-        .from('sales_velocity')
-        .select('*')
-        .eq('org_id', orgId)
-        .eq('asin', snap.asin)
-        .eq('snapshot_date', snapshotDate)
-        .single()
+for (const snap of enrichedSnapshots) {
+  const asinRec = asinUpserts.find(a => a.asin === snap.asin)
+  if (!asinRec) continue
 
-      const finalVel   = velRec?.final_velocity ?? 0
+  const finalVel = velByAsin[snap.asin ?? ''] ?? 0
       const skuId      = snap.sku_id
       const supplier   = skuId ? supplierBySkuId[skuId] : null
       const unitCost   = supplier?.usd_per_unit ?? 0
