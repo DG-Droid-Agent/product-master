@@ -160,7 +160,7 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
 
     // ── Build and save velocity rows (from FBA sales data) ────────────────
     const teamPushByAsin: Record<string, number> = {}
-    asinUpserts.forEach(a => { teamPushByAsin[a.asin] = a.team_push_multiplier })
+    asinUpserts.forEach(a => { if (a.asin) teamPushByAsin[a.asin as string] = a.team_push_multiplier })
 
     const velRows = buildVelocityRows(fbaRows, orgId, teamPushByAsin)
   .map(r => ({ ...r, snapshot_date: snapshotDate }))
@@ -195,7 +195,7 @@ export default function InventoryUpload({ orgId, userEmail, onComplete }: {
         ? (supplier.cbm / supplier.carton_qty)
         : 0
 
-      const planCalc = calcPlanning(asinRec, snap.true_inventory_units ?? 0, finalVel, unitCost, cbmPerUnit)
+      const planCalc = calcPlanning({...asinRec, asin: asinRec.asin as string}, snap.true_inventory_units ?? 0, finalVel, unitCost, cbmPerUnit)
       planInserts.push({ org_id: orgId, asin: snap.asin, snapshot_date: snapshotDate, ...planCalc })
     }
 
