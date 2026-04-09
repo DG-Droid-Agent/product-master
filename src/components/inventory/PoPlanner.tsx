@@ -84,7 +84,7 @@ function exportPoToExcel(po: PurchaseOrder, lines: PoLineItem[]) {
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')
   a.href     = url
-  a.download = `${po.po_number || 'PO'}-${po.supplier_name.replace(/\s+/g, '_')}.csv`
+  a.download = `${po.po_number || 'PO'}-${(po.supplier_name ?? 'supplier').replace(/\s+/g, '_')}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }
