@@ -485,8 +485,8 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
                       return (
                         <tr key={a.asin} style={{ background: isSelected ? 'var(--accent-light)' : i % 2 === 0 ? 'var(--surface)' : 'var(--surface2)', cursor: 'pointer' }}
                           onClick={() => setSelectedAsin(selectedAsin === a.asin ? null : a.asin!)}>
-                          <td style={{ padding: '10px 10px', textAlign: 'center' }} onClick={e => { e.stopPropagation(); toggleSelect(a.asin!) }}>
-                            <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(a.asin!)} style={{ cursor: 'pointer' }} />
+                          <td style={{ padding: '10px 10px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                          <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(a.asin!)} style={{ cursor: 'pointer' }} />
                           </td>
                           <td style={{ padding: '10px 10px' }}>
                             <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 3, fontSize: 10, fontWeight: 600, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, whiteSpace: 'nowrap' }}>{cfg.label}</span>
