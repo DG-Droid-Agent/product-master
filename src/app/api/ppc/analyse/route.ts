@@ -166,10 +166,38 @@ async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existin
     })
 
   // ── TOXIC COMBOS ──────────────────────────────────────────────────────────
+  // Phrases where each component word converts well individually (ROAS ≥ 2.0)
+  // but the combined phrase does not (ROAS < 1.0). Treated as HIGH phrase negatives.
   const goodWords = new Set(uni.filter(u => u.roas >= 2.0).map(u => u.ngram))
   const toxicCombos = [...bi, ...tri]
     .filter(row => row.roas < 1.0 && row.ngram.split(' ').every(w => goodWords.has(w)))
-    .map(row => ({ ...row, combo_type: row.ngram.split(' ').length === 2 ? 'bigram' : 'trigram', reason: `Each word ROAS≥2.0 but combined ROAS=${row.roas.toFixed(2)}` }))
+    .map(row => {
+      // Per-campaign attribution — which campaigns have spend on this phrase
+      const campRows = rows.filter(r => r.search_term.toLowerCase().includes(row.ngram))
+      const campBreakdown = campaigns.map(c => {
+        const cr = campRows.filter(r => r.campaign_name === c)
+        const cs = cr.reduce((s, r) => s + r.cost, 0)
+        const ss = cr.reduce((s, r) => s + r.sales, 0)
+        return cs > 0 ? { name: c, spend: cs, roas: cs > 0 ? ss / cs : 0 } : null
+      }).filter(Boolean) as { name: string; spend: number; roas: number }[]
+
+      // Recommend negating only in campaigns where ROAS < 1.0
+      const recCamps = campBreakdown.filter(c => c.roas < 1.0).map(c => c.name)
+
+      // Priority: ROAS < 1.0 always → HIGH (these already filtered to roas < 1.0)
+      const priority = row.roas < 1.0 ? 'HIGH' : 'MEDIUM'
+
+      return {
+        ...row,
+        combo_type: row.ngram.split(' ').length === 2 ? 'bigram' : 'trigram',
+        reason: `Each word ROAS≥2.0 but combined ROAS=${row.roas.toFixed(2)}`,
+        priority,
+        recommended_scope: recCamps.length > 0 ? recCamps.join(', ') : campaigns.join(', '),
+        camp_breakdown: campBreakdown,
+        // Mark as phrase negative — same action as regular phrase negatives
+        match_type_recommendation: 'negative_phrase',
+      }
+    })
     .sort((a, b) => b.wasted_spend - a.wasted_spend)
 
   // ── HARVEST CANDIDATES ────────────────────────────────────────────────────

@@ -87,14 +87,31 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
           </select>
         </div>
         <div>
-          <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>Apply to campaigns</div>
+          <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>
+            Apply to campaigns
+            <span style={{ marginLeft: 6, color: '#dc2626', fontWeight: 400, textTransform: 'none' as const, letterSpacing: 0 }}>— red border = recommended (ROAS &lt; 1.0)</span>
+          </div>
           <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' as const }}>
             {(campaigns ?? []).map((c: string) => {
-              const inList = (d.campaigns ?? []).includes(c)
+              const inList  = (d.campaigns ?? []).includes(c)
+              const recList = (row.recommended_scope ?? '').split(', ').map((s: string) => s.trim()).filter(Boolean)
+              const isRec   = recList.length > 0 ? recList.includes(c) : true // if no rec data, treat all as recommended
+              // Visual states:
+              // selected + recommended  → solid red (negating where it hurts)
+              // selected + not rec      → solid accent (manually added override)
+              // unselected + recommended → red outline with warning icon (suggested action)
+              // unselected + not rec    → neutral grey
+              const bg     = inList ? (isRec ? '#dc2626' : 'var(--accent)') : 'var(--surface2)'
+              const color  = inList ? '#fff'    : isRec ? '#dc2626' : 'var(--text3)'
+              const border = inList ? (isRec ? '1.5px solid #dc2626' : '1.5px solid var(--accent)') : isRec ? '1.5px dashed #dc2626' : '1px solid var(--border)'
               return (
-                <button key={c} onClick={() => onUpdate(keyStr, 'campaigns', inList ? d.campaigns.filter((x: string) => x !== c) : [...(d.campaigns ?? []), c])}
-                  style={{ fontSize: 11, padding: '3px 9px', borderRadius: 5, cursor: 'pointer', border: '1px solid', background: inList ? 'var(--accent)' : 'var(--surface2)', color: inList ? '#fff' : 'var(--text)', borderColor: inList ? 'var(--accent)' : 'var(--border)' }}>
+                <button key={c}
+                  onClick={() => onUpdate(keyStr, 'campaigns', inList ? (d.campaigns ?? []).filter((x: string) => x !== c) : [...(d.campaigns ?? []), c])}
+                  title={isRec ? `Recommended: ROAS < 1.0 in "${c}" — negate here` : `Not recommended: converting in "${c}" — leave alone`}
+                  style={{ fontSize: 11, padding: '3px 9px', borderRadius: 5, cursor: 'pointer', border, background: bg, color, fontWeight: isRec ? 600 : 400, display: 'flex', alignItems: 'center', gap: 3 }}>
+                  {isRec && !inList && <span style={{ fontSize: 9 }}>⚠</span>}
                   {c}
+                  {!isRec && inList && <span style={{ fontSize: 9, opacity: 0.7 }} title="Converting here — are you sure?">✓override</span>}
                 </button>
               )
             })}
@@ -419,9 +436,15 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
     run()
   }, [])
 
-  const toggle = (key: string) => {
+  const toggle = (key: string, recCampaigns?: string[]) => {
     setSelected(p => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n })
-    setDecisionMap(p => { if (p.has(key)) return p; const n = new Map(p); n.set(key, { status: 'pending', campaigns: [], notes: '' }); return n })
+    setDecisionMap(p => {
+      if (p.has(key)) return p
+      const n = new Map(p)
+      // Auto-pre-select recommended campaigns on first tick
+      n.set(key, { status: 'pending', campaigns: recCampaigns ?? [], notes: '' })
+      return n
+    })
   }
   const update = (key: string, field: string, value: any) => setDecisionMap(p => { const n = new Map(p); n.set(key, { ...(n.get(key) ?? { status:'pending', campaigns:[], notes:'' }), [field]: value }); return n })
 
@@ -437,6 +460,11 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
       const key = `neg_exact_${row.search_term}`; if (!selected.has(key)) continue
       const d = decisionMap.get(key) ?? { status:'pending', campaigns:[], notes:'' }
       out.push({ term: row.search_term, match_type: 'negative_exact', priority: 'HIGH', campaign_names: d.campaigns, roas_at_decision: 0, wasted_at_decision: row.wasted_spend, purchases_at_decision: 0, status: d.status, notes: d.notes, is_generic_flag: false })
+    }
+    for (const row of (results.toxic_combos ?? [])) {
+      const key = `toxic_${row.ngram}`; if (!selected.has(key)) continue
+      const d = decisionMap.get(key) ?? { status:'pending', campaigns: row.recommended_scope?.split(', ') ?? [], notes:'' }
+      out.push({ term: row.ngram, match_type: 'negative_phrase', priority: 'HIGH', campaign_names: d.campaigns, roas_at_decision: row.roas, wasted_at_decision: row.wasted_spend, purchases_at_decision: row.purchases, status: d.status, notes: d.notes, is_generic_flag: false })
     }
     for (const row of (results.harvest_candidates ?? [])) {
       for (const mt of (row.match_types?.split(', ') ?? ['Phrase'])) {
@@ -559,7 +587,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 2, background: 'var(--surface2)', borderRadius: 8, padding: 3, marginBottom: 14, width: 'fit-content' }}>
         {([
-          { key:'negatives', label:'Negatives', count:(phrase_high?.length??0)+(phrase_medium?.length??0)+(exact_negatives?.length??0) },
+          { key:'negatives', label:'Negatives', count:(phrase_high?.length??0)+(phrase_medium?.length??0)+(exact_negatives?.length??0)+(toxic_combos?.length??0) },
           { key:'harvest',   label:'Harvest',   count: harvest_candidates?.length??0 },
           { key:'ngrams',    label:'N-gram tables' },
         ] as {key:Tab;label:string;count?:number}[]).map(t => (
@@ -580,24 +608,110 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
                 <button onClick={() => phrase_high.forEach((r: any) => { if (!selected.has(`neg_phrase_${r.ngram}`)) toggle(`neg_phrase_${r.ngram}`) })} style={{ fontSize:11, background:'rgba(220,38,38,.1)', color:'#dc2626', border:'1px solid rgba(220,38,38,.2)', borderRadius:5, padding:'4px 10px', cursor:'pointer', fontWeight:600 }}>☑ Select all HIGH ({phrase_high.length})</button>
                 {selected.size > 0 && <span style={{ fontSize:11, color:'var(--text3)', alignSelf:'center' }}>{selected.size} selected</span>}
               </div>
-              {phrase_high.map((r: any) => <NegRow key={r.ngram} row={r} keyStr={`neg_phrase_${r.ngram}`} selected={selected} decision={decisionMap.get(`neg_phrase_${r.ngram}`)} onToggle={toggle} onUpdate={update} campaigns={summary.campaigns??[]} />)}
+              {phrase_high.map((r: any) => <NegRow key={r.ngram} row={r} keyStr={`neg_phrase_${r.ngram}`} selected={selected} decision={decisionMap.get(`neg_phrase_${r.ngram}`)} onToggle={(k: string) => toggle(k, r.recommended_scope?.split(', '))} onUpdate={update} campaigns={summary.campaigns??[]} />)}
             </div>
           )}
           {(phrase_medium?.length??0) > 0 && (
             <div style={{ marginBottom: 18 }}>
               <SectionTitle label="MEDIUM priority phrase negatives" sub="ROAS 1.0–1.49 · negate + monitor" color="#ea580c" />
-              {phrase_medium.map((r: any) => <NegRow key={r.ngram} row={r} keyStr={`neg_phrase_${r.ngram}`} selected={selected} decision={decisionMap.get(`neg_phrase_${r.ngram}`)} onToggle={toggle} onUpdate={update} campaigns={summary.campaigns??[]} />)}
+              {phrase_medium.map((r: any) => <NegRow key={r.ngram} row={r} keyStr={`neg_phrase_${r.ngram}`} selected={selected} decision={decisionMap.get(`neg_phrase_${r.ngram}`)} onToggle={(k: string) => toggle(k, r.recommended_scope?.split(', '))} onUpdate={update} campaigns={summary.campaigns??[]} />)}
             </div>
           )}
           {(exact_negatives?.length??0) > 0 && (
             <div style={{ marginBottom: 18 }}>
               <SectionTitle label="Exact match negatives" sub="$15+ wasted · 0 purchases" color="#dc2626" />
-              {exact_negatives.map((r: any) => <NegRow key={r.search_term} row={r} keyStr={`neg_exact_${r.search_term}`} selected={selected} decision={decisionMap.get(`neg_exact_${r.search_term}`)} onToggle={toggle} onUpdate={update} campaigns={summary.campaigns??[]} isExact />)}
+              {exact_negatives.map((r: any) => <NegRow key={r.search_term} row={r} keyStr={`neg_exact_${r.search_term}`} selected={selected} decision={decisionMap.get(`neg_exact_${r.search_term}`)} onToggle={(k: string) => toggle(k, r.campaigns?.split(', '))} onUpdate={update} campaigns={summary.campaigns??[]} isExact />)}
             </div>
           )}
+          {/* Toxic combos — actionable phrase negatives */}
+          {(toxic_combos?.length??0) > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <SectionTitle label="⚡ Toxic combinations — phrase negatives" sub="Each word converts well alone but ROAS < 1.0 combined" color="#ea580c" />
+              <div style={{ fontSize:11, color:'var(--text3)', marginBottom:8, paddingLeft:16 }}>
+                Negate as phrase in campaigns where spend is negative. Negating the phrase won't block the individual words from converting.
+              </div>
+              {toxic_combos.map((row: any) => (
+                <div key={row.ngram} style={{ border:`1px solid ${selected.has(`toxic_${row.ngram}`) ? 'var(--accent)' : 'rgba(234,88,12,.25)'}`, borderRadius:8, background: selected.has(`toxic_${row.ngram}`) ? 'var(--accent-light)' : 'rgba(234,88,12,.03)', padding:'10px 14px', marginBottom:5 }}>
+                  {/* Top row */}
+                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                    <input type="checkbox" checked={selected.has(`toxic_${row.ngram}`)} onChange={() => toggle(`toxic_${row.ngram}`)}
+                      style={{ width:15, height:15, accentColor:'var(--accent)', cursor:'pointer', flexShrink:0 }} />
+                    <span style={{ fontFamily:'var(--mono)', fontSize:13, fontWeight:700 }}>{row.ngram}</span>
+                    <span style={{ fontSize:10, color:'var(--text3)', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:4, padding:'1px 6px' }}>{row.combo_type}</span>
+                    <div style={{ flex:1 }} />
+                    <span style={{ fontSize:12, fontWeight:700, color:'#dc2626', fontFamily:'var(--mono)' }}>${row.wasted_spend?.toFixed(2)} wasted</span>
+                    <span style={{ fontSize:11, color:'var(--text3)' }}>ROAS {row.roas?.toFixed(2)}x</span>
+                    <span style={{ fontSize:11, color:'var(--text3)' }}>ACOS {row.acos?.toFixed(1)}%</span>
+                  </div>
+                  {/* Campaign breakdown */}
+                  <div style={{ paddingLeft:25, marginTop:6 }}>
+                    <div style={{ fontSize:11, color:'var(--text3)', marginBottom:4 }}>{row.reason}</div>
+                    {row.camp_breakdown?.length > 0 && (
+                      <div style={{ display:'flex', gap:10, flexWrap:'wrap' as const, marginBottom:6 }}>
+                        {row.camp_breakdown.map((c: any) => (
+                          <span key={c.name} style={{ fontSize:11, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:5, padding:'2px 8px' }}>
+                            <span style={{ fontWeight:600 }}>{c.name}</span>
+                            <span style={{ color:'var(--text3)', marginLeft:6 }}>${c.spend.toFixed(2)} · ROAS {c.roas.toFixed(2)}x</span>
+                            {c.roas < 1.0 && <span style={{ color:'#dc2626', marginLeft:4, fontWeight:600 }}>← negate here</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {/* Inline controls when selected */}
+                  {selected.has(`toxic_${row.ngram}`) && (() => {
+                    const d = decisionMap.get(`toxic_${row.ngram}`) ?? { status:'pending', campaigns: row.recommended_scope?.split(', ')??[], notes:'' }
+                    return (
+                      <div style={{ display:'grid', gridTemplateColumns:'180px 1fr 1fr', gap:10, paddingLeft:25, marginTop:8 }}>
+                        <div>
+                          <div style={{ fontSize:10, color:'var(--text3)', marginBottom:3, textTransform:'uppercase' as const, letterSpacing:'.06em' }}>Status</div>
+                          <select value={d.status} onChange={e => update(`toxic_${row.ngram}`, 'status', e.target.value)}
+                            style={{ width:'100%', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:5, padding:'5px 8px', fontSize:12, color:'var(--text)' }}>
+                            {Object.entries(STATUS).filter(([v]) => v !== 'reversed').map(([v, s]) => <option key={v} value={v}>{s.icon} {s.label}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <div style={{ fontSize:10, color:'var(--text3)', marginBottom:3, textTransform:'uppercase' as const, letterSpacing:'.06em' }}>
+                            Apply to campaigns
+                            <span style={{ marginLeft:6, color:'#dc2626', fontWeight:400, textTransform:'none' as const }}>— red = ROAS &lt; 1.0</span>
+                          </div>
+                          <div style={{ display:'flex', gap:5, flexWrap:'wrap' as const }}>
+                            {(summary.campaigns??[]).map((c: string) => {
+                              const inList  = (d.campaigns??[]).includes(c)
+                              const recList = (row.recommended_scope??'').split(', ').map((s: string)=>s.trim()).filter(Boolean)
+                              const isRec   = recList.includes(c)
+                              const campData = row.camp_breakdown?.find((b: any) => b.name === c)
+                              const bg     = inList ? (isRec ? '#dc2626' : 'var(--accent)') : 'var(--surface2)'
+                              const color  = inList ? '#fff' : isRec ? '#dc2626' : 'var(--text)'
+                              const border = inList ? (isRec ? '#dc2626' : 'var(--accent)') : isRec ? '#dc2626' : 'var(--border)'
+                              return (
+                                <button key={c}
+                                  onClick={() => update(`toxic_${row.ngram}`, 'campaigns', inList ? d.campaigns.filter((x: string)=>x!==c) : [...(d.campaigns??[]),c])}
+                                  title={campData ? `${c}: $${campData.spend.toFixed(2)} spend · ROAS ${campData.roas.toFixed(2)}x` : c}
+                                  style={{ fontSize:11, padding:'3px 9px', borderRadius:5, cursor:'pointer', border:`1.5px solid ${border}`, background:bg, color, fontWeight:isRec?700:400, display:'flex', alignItems:'center', gap:4 }}>
+                                  {isRec && !inList && <span style={{ fontSize:9 }}>⚠</span>}
+                                  {c}
+                                  {campData && <span style={{ fontSize:9, opacity:0.7 }}>{campData.roas.toFixed(1)}x</span>}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize:10, color:'var(--text3)', marginBottom:3, textTransform:'uppercase' as const, letterSpacing:'.06em' }}>Notes</div>
+                          <input type="text" value={d.notes??''} placeholder="Optional…" onChange={e => update(`toxic_${row.ngram}`, 'notes', e.target.value)}
+                            style={{ width:'100%', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:5, padding:'5px 8px', fontSize:12, color:'var(--text)', boxSizing:'border-box' as const }} />
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
             {(phrase_watch?.length??0) > 0 && <div style={{ background:'rgba(202,138,4,.06)', border:'1px solid rgba(202,138,4,.2)', borderRadius:8, padding:'12px 14px' }}><div style={{ fontSize:12, fontWeight:600, color:'#ca8a04', marginBottom:3 }}>🟡 Watch list — {phrase_watch.length} items</div><div style={{ fontSize:11, color:'var(--text3)' }}>Below significance threshold. Re-review after 30 more days.</div></div>}
-            {(toxic_combos?.length??0) > 0 && <div style={{ background:'rgba(234,88,12,.06)', border:'1px solid rgba(234,88,12,.2)', borderRadius:8, padding:'12px 14px' }}><div style={{ fontSize:12, fontWeight:600, color:'#ea580c', marginBottom:3 }}>⚡ {toxic_combos.length} toxic combos</div><div style={{ fontSize:11, color:'var(--text3)' }}>Good words individually, bad combined. See N-gram tables.</div></div>}
           </div>
           {/* Log bar — inline, no fixed positioning */}
           {selected.size > 0 && (
@@ -638,7 +752,8 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
           <NGramTable rows={ngrams?.tri??[]} label="Trigrams" />
           {(toxic_combos?.length??0) > 0 && (
             <div>
-              <div style={{ fontSize:12, fontWeight:600, marginBottom:8 }}>⚡ Toxic combinations</div>
+              <div style={{ fontSize:12, fontWeight:600, marginBottom:4 }}>⚡ Toxic combinations</div>
+              <div style={{ fontSize:11, color:'var(--text3)', marginBottom:8 }}>These also appear as actionable negatives in the Negatives tab.</div>
               <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse' as const, fontSize:12 }}>
                   <thead><tr style={{ background:'var(--surface2)' }}>{['Phrase','Type','Wasted','ROAS','ACOS','Why'].map(h=><th key={h} style={{ textAlign:'left' as const, padding:'7px 10px', fontSize:10, fontWeight:600, textTransform:'uppercase' as const, letterSpacing:'.06em', color:'var(--text3)', borderBottom:'1px solid var(--border)' }}>{h}</th>)}</tr></thead>
