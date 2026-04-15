@@ -57,14 +57,14 @@ export default function PPCDecisionsPage() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
       supabase.from('orgs').select('id').limit(1).single()
-        .then(({ data }) => {
-          if (data?.org_id) {
-            setOrgId(data.org_id)
-            supabase.from('brands').select('id, name').eq('org_id', data.org_id).then(({ data: b }) => {
-              if (b) setBrands(b)
-            })
-          }
-        })
+  	.then(({ data }) => {
+   	 if (data?.id) {
+      		setOrgId(data.id)
+      		supabase.from('products').select('brand').then(({ data: b }) => {
+        	if (b) setBrands([...new Set(b.map((r: any) => r.brand).filter(Boolean))].sort())
+     		})
+   	 }
+  	})
     })
   }, [])
 
