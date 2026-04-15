@@ -309,7 +309,7 @@ export default function PPCAnalysisPage() {
                       status={d.status} campaigns={d.campaigns} notes={d.notes}
                       allCampaigns={summary.campaigns ?? []}
                       onToggle={() => toggleSelect(key)}
-                      onUpdate={(f, v) => updateDecision(key, f, v)} />
+                      onUpdate={(f: string, v: any) => updateDecision(key, f, v)} />
                   )
                 })}
               </div>
