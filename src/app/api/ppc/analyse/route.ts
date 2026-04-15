@@ -242,14 +242,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing: upload_ids, date_range_days, org_id' }, { status: 400 })
     }
 
-    const { data: termRows, error: termError } = await supabase
-      .from('ppc_search_terms')
-      .select('search_term, campaign_name, cost, purchases, sales, matched_keyword')
-      .in('upload_id', upload_ids)
-      .eq('org_id', org_id)
+    // Fetch upload metadata for run naming + raw term rows
+    const [{ data: uploadMeta }, { data: termRows, error: termError }] = await Promise.all([
+      supabase
+        .from('ppc_uploads')
+        .select('asin, report_start_date, report_end_date, campaign_name, campaign_type')
+        .in('id', upload_ids),
+      supabase
+        .from('ppc_search_terms')
+        .select('search_term, campaign_name, cost, purchases, sales, matched_keyword')
+        .in('upload_id', upload_ids)
+        .eq('org_id', org_id),
+    ])
 
     if (termError) throw termError
     if (!termRows?.length) return NextResponse.json({ error: 'No data found for these uploads' }, { status: 404 })
+
+    // Build a meaningful run name: Brand · ASIN · Report dates · Campaign types
+    // e.g. "Eco Living · B0XXXXX · 10 Feb–15 Apr 2026 · auto, broad"
+    const asins        = [...new Set((uploadMeta ?? []).map((u: any) => u.asin).filter(Boolean))]
+    const campaignTypes = [...new Set((uploadMeta ?? []).map((u: any) => u.campaign_type).filter(Boolean))]
+    const dates        = (uploadMeta ?? []).flatMap((u: any) => [u.report_start_date, u.report_end_date].filter(Boolean))
+    const startDate    = dates.length ? dates.reduce((a: string, b: string) => a < b ? a : b) : null
+    const endDate      = dates.length ? dates.reduce((a: string, b: string) => a > b ? a : b) : null
+
+    const fmt = (d: string | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : null
+    const dateLabel = startDate && endDate && startDate !== endDate
+      ? `${fmt(startDate)} – ${fmt(endDate)}`
+      : startDate ? fmt(startDate)!
+      : null
+
+    const autoRunName = [
+      brand,
+      asins.length ? asins.join(', ') : null,
+      dateLabel,
+      campaignTypes.length ? campaignTypes.join(', ') : null,
+    ].filter(Boolean).join(' · ')
 
     const existingKeywords = [...new Set(termRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
     const results = await runAnalysis(termRows as SearchTermRow[], date_range_days, existingKeywords)
@@ -281,7 +309,10 @@ export async function POST(request: NextRequest) {
         .from('ppc_analysis_runs')
         .insert({
           org_id, brand: brand ?? null,
-          run_name: run_name ?? `Analysis ${new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })}`,
+          asin: asins[0] ?? null,
+          report_start_date: startDate ?? null,
+          report_end_date: endDate ?? null,
+          run_name: run_name ?? autoRunName ?? `Analysis ${new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })}`,
           upload_ids, date_range_days,
           portfolio_roas:    results.summary.overall_roas,
           total_spend:       results.summary.total_spend,

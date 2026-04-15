@@ -379,15 +379,27 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
         if (json.existing_decisions?.length) {
           const preMap = new Map<string, any>()
           for (const d of json.existing_decisions) {
-            // Build the same key format used by the UI
+            // Build keys matching exactly what NegRow and HarvestRow use
+            // negative_phrase → neg_phrase_{term}
+            // negative_exact  → neg_exact_{term}
+            // harvest_exact   → harvest_Exact_{term}  (UI capitalises the match type)
+            // harvest_phrase  → harvest_Phrase_{term}
+            // harvest_broad   → harvest_Broad_{term}
             let key = ''
-            if (d.match_type === 'negative_phrase') key = `neg_phrase_${d.term}`
-            else if (d.match_type === 'negative_exact') key = `neg_exact_${d.term}`
-            else key = `harvest_${d.match_type.replace('harvest_','')}_ ${d.term}`
-            preMap.set(key, { status: d.status, campaigns: d.campaign_names ?? [], notes: d.notes ?? '' })
+            if (d.match_type === 'negative_phrase') {
+              key = `neg_phrase_${d.term}`
+            } else if (d.match_type === 'negative_exact') {
+              key = `neg_exact_${d.term}`
+            } else if (d.match_type.startsWith('harvest_')) {
+              // DB stores "harvest_exact" — UI key uses "harvest_Exact_term"
+              const mtPart = d.match_type.replace('harvest_', '')
+              const mtCap  = mtPart.charAt(0).toUpperCase() + mtPart.slice(1)
+              key = `harvest_${mtCap}_${d.term}`
+            }
+            if (key) preMap.set(key, { status: d.status, campaigns: d.campaign_names ?? [], notes: d.notes ?? '' })
           }
           setDecisionMap(preMap)
-          // Auto-select all terms that already have a decision logged
+          // Auto-select all terms that already have a logged decision
           setSelected(new Set(preMap.keys()))
         }
 
@@ -810,7 +822,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
       setOrgId(org.id)
       const [{ data: bData }, { data: runs }, { count }] = await Promise.all([
         supabase.from('products').select('brand'),
-        supabase.from('ppc_analysis_runs').select('id,run_name,run_at,brand,date_range_days,total_spend,total_wasted,high_negatives,medium_negatives,harvest_candidates,upload_ids').eq('org_id', org.id).order('run_at', { ascending: false }).limit(10),
+        supabase.from('ppc_analysis_runs').select('id,run_name,run_at,brand,asin,report_start_date,report_end_date,date_range_days,total_spend,total_wasted,high_negatives,medium_negatives,harvest_candidates,upload_ids').eq('org_id', org.id).order('run_at', { ascending: false }).limit(20),
         supabase.from('ppc_decisions_log').select('*', { count:'exact', head:true }).eq('org_id', org.id).eq('status', 'pending'),
       ])
       if (bData) setBrands([...new Set(bData.map((r: any) => r.brand).filter(Boolean))].sort() as string[])
@@ -885,22 +897,33 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                 return (
                   <div key={run.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <span style={{ fontSize:13, fontWeight:600 }}>{run.run_name}</span>
+                      {/* Primary identity row: Brand · ASIN · Report date range */}
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                        {run.brand && <span style={{ fontSize:13, fontWeight:700, color:'var(--accent)' }}>{run.brand}</span>}
+                        {run.asin  && <span style={{ fontSize:12, fontFamily:'var(--mono)', color:'var(--text2)', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:4, padding:'1px 6px' }}>{run.asin}</span>}
+                        {(run.report_start_date || run.report_end_date) && (
+                          <span style={{ fontSize:12, fontWeight:600, color:'var(--text)' }}>
+                            {run.report_start_date ? new Date(run.report_start_date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}
+                            {run.report_start_date && run.report_end_date ? ' – ' : ''}
+                            {run.report_end_date   ? new Date(run.report_end_date).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : ''}
+                          </span>
+                        )}
+                        {!run.report_start_date && !run.report_end_date && (
+                          <span style={{ fontSize:12, color:'var(--text2)', fontWeight:600 }}>{run.date_range_days}-day report</span>
+                        )}
                         {dupeCount > 1 && (
                           <span style={{ fontSize:10, color:'var(--text3)', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:4, padding:'1px 6px' }}>
                             run {dupeCount}× — showing latest
                           </span>
                         )}
                       </div>
-                      <div style={{ fontSize:11, color:'var(--text3)', marginTop:3, display:'flex', gap:14, flexWrap:'wrap' as const }}>
-                        {run.brand && <span style={{ color:'var(--accent)', fontWeight:600 }}>{run.brand}</span>}
-                        <span>{run.date_range_days}-day</span>
+                      {/* Secondary: performance stats */}
+                      <div style={{ fontSize:11, color:'var(--text3)', display:'flex', gap:12, flexWrap:'wrap' as const }}>
                         <span>${run.total_spend?.toFixed(2)} spend</span>
                         <span style={{ color:'var(--red)', fontWeight:600 }}>${run.total_wasted?.toFixed(2)} wasted</span>
-                        <span style={{ color:'#dc2626' }}>{run.high_negatives} HIGH negatives</span>
-                        <span style={{ color:'var(--accent)' }}>{run.harvest_candidates} harvest candidates</span>
-                        <span style={{ color:'var(--text3)' }}>{new Date(run.run_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>
+                        <span style={{ color:'#dc2626' }}>{run.high_negatives} HIGH</span>
+                        <span style={{ color:'var(--accent)' }}>{run.harvest_candidates} harvest</span>
+                        <span>Analysed {new Date(run.run_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>
                       </div>
                     </div>
                     <div style={{ display:'flex', gap:8, flexShrink:0, marginLeft:16 }}>
