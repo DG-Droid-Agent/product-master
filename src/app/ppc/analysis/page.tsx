@@ -123,7 +123,7 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
       padding: '10px 14px', marginBottom: 6, transition: 'border-color .15s',
     }}>
       {/* Row 1: checkbox + term + badges + wasted */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: isSelected ? 10 : 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <input type="checkbox" checked={isSelected} onChange={() => onToggle(keyStr)}
           style={{ width: 15, height: 15, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
@@ -144,9 +144,8 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
         {row.appearances > 0 && <span style={{ fontSize: 11, color: 'var(--text3)' }}>{row.appearances} apps</span>}
       </div>
 
-      {/* Row 2: inline controls — always visible when selected */}
-      {isSelected && (
-        <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr', gap: 10, paddingLeft: 25 }}>
+      {/* Row 2: inline controls — ALWAYS VISIBLE, not gated on selection */}
+      <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr', gap: 10, paddingLeft: 25, marginTop: 8 }}>
           <div>
             <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>Status</div>
             <select value={d.status} onChange={e => onUpdate(keyStr, 'status', e.target.value)}
@@ -177,7 +176,6 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
               style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 5, padding: '5px 8px', fontSize: 12, color: 'var(--text)', boxSizing: 'border-box' as const }} />
           </div>
         </div>
-      )}
     </div>
   )
 }
@@ -468,19 +466,22 @@ function PPCAnalysisPage() {
         <StatCard label="Addressable waste" value={`$${summary.addressable_waste?.toFixed(2)}`} sub={`${((summary.addressable_waste / summary.total_wasted) * 100)?.toFixed(0)}% of wasted`} />
       </div>
 
-      {/* INSIGHT ROW */}
+      {/* INSIGHT ROW — clickable to filter tab */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 16 }}>
         {[
-          { icon: '🔴', label: `${phrase_high?.length ?? 0} HIGH negatives`, sub: 'Negate now', bg: 'rgba(220,38,38,.06)', border: 'rgba(220,38,38,.2)' },
-          { icon: '⚡', label: `${toxic_combos?.length ?? 0} toxic combos`, sub: 'Good words, bad phrase', bg: 'rgba(234,88,12,.06)', border: 'rgba(234,88,12,.2)' },
-          { icon: '🚀', label: `${harvest_candidates?.length ?? 0} harvest candidates`, sub: 'Keywords to push', bg: 'rgba(22,101,52,.06)', border: 'rgba(22,101,52,.2)' },
+          { icon: '🔴', label: `${phrase_high?.length ?? 0} HIGH negatives`, sub: 'Click to view · negate now', bg: 'rgba(220,38,38,.06)', border: 'rgba(220,38,38,.2)', tab: 'negatives' as Tab },
+          { icon: '⚡', label: `${toxic_combos?.length ?? 0} toxic combos`, sub: 'Click to view in N-gram tables', bg: 'rgba(234,88,12,.06)', border: 'rgba(234,88,12,.2)', tab: 'ngrams' as Tab },
+          { icon: '🚀', label: `${harvest_candidates?.length ?? 0} harvest candidates`, sub: 'Click to view · keywords to push', bg: 'rgba(22,101,52,.06)', border: 'rgba(22,101,52,.2)', tab: 'harvest' as Tab },
         ].map(item => (
-          <div key={item.label} style={{ background: item.bg, border: `1px solid ${item.border}`, borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div key={item.label} onClick={() => setActiveTab(item.tab)} style={{ background: item.bg, border: `1px solid ${item.border}`, borderRadius: 8, padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', transition: 'opacity .15s' }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.opacity = '0.8'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.opacity = '1'}>
             <span style={{ fontSize: 18 }}>{item.icon}</span>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700 }}>{item.label}</div>
               <div style={{ fontSize: 11, color: 'var(--text3)' }}>{item.sub}</div>
             </div>
+            <span style={{ marginLeft: 'auto', fontSize: 14, color: 'var(--text3)' }}>→</span>
           </div>
         ))}
       </div>
@@ -653,15 +654,16 @@ function PPCAnalysisPage() {
         </div>
       )}
 
-      {/* Fix #3: sticky log bar stays, but after save shows toast NOT redirect */}
+      {/* Log bar — inline at bottom of content, no fixed positioning that breaks scroll */}
       {selected.size > 0 && (
         <div style={{
-          position: 'fixed', bottom: 0, left: 0, right: 0,
-          background: 'var(--surface)', borderTop: '1px solid var(--border)',
-          padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          boxShadow: '0 -4px 16px rgba(0,0,0,.1)', zIndex: 50,
+          marginTop: 24,
+          background: 'var(--surface)', border: '1px solid var(--accent)',
+          borderRadius: 10, padding: '14px 18px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          boxShadow: '0 2px 12px rgba(0,0,0,.08)',
         }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.size} decision{selected.size > 1 ? 's' : ''} selected</span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.size} decision{selected.size > 1 ? 's' : ''} ready to log</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn-secondary" onClick={() => setSelected(new Set())} style={{ fontSize: 12 }}>Clear</button>
             <button className="btn-primary" onClick={handleSave} disabled={saving} style={{ fontSize: 12, opacity: saving ? 0.6 : 1 }}>
@@ -670,7 +672,6 @@ function PPCAnalysisPage() {
           </div>
         </div>
       )}
-      {selected.size > 0 && <div style={{ height: 64 }} />}
     </div>
   )
 }
