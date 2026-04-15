@@ -136,21 +136,14 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
   // We open them in the same window via router push from here.
   // Simpler: use window.location since these are full pages, not components.
 
-  const VIEW_URLS: Record<PPCView, string> = {
-    home:      '/ppc',
-    upload:    '/ppc/upload',
-    analysis:  '/ppc/analysis',
-    decisions: '/ppc/decisions',
-  }
+  const VIEW_URLS: Record<string, string> = {
+  upload:    '/ppc/upload',
+  analysis:  '/ppc/analysis',
+  decisions: '/ppc/decisions',
+}
 
-  // For upload/analysis/decisions — navigate to the full page
-  // (these are complete Next.js pages with their own layout)
-  if (view !== 'home') {
-    if (typeof window !== 'undefined') {
-      window.location.href = VIEW_URLS[view]
-    }
-    return <div className="loading">⟳ Loading…</div>
-  }
-
-  return null
+if (typeof window !== 'undefined') {
+  window.location.href = VIEW_URLS[view] ?? '/ppc'
+}
+return <div className="loading">⟳ Loading…</div>
 }
