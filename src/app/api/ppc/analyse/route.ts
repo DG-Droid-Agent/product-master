@@ -87,7 +87,7 @@ function genericFlag(term: string): string {
   return ''
 }
 
-export async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[]) {
+async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[]) {
   const campaigns = [...new Set(rows.map(r => r.campaign_name))]
 
   // Portfolio aggregation
