@@ -118,7 +118,7 @@ async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existin
       const cr = rows.filter(r => r.campaign_name === c && r.search_term.toLowerCase().includes(row.ngram))
       const cs = cr.reduce((s, r) => s + r.cost, 0)
       const ss = cr.reduce((s, r) => s + r.sales, 0)
-      return cs > 0 && ss / cs < 1.0
+      return cs >= 10 && ss / cs < 1.0
     })
 
     const autoRows  = rows.filter(r => r.campaign_name.toLowerCase().includes('auto')  && r.search_term.toLowerCase().includes(row.ngram))
@@ -182,7 +182,8 @@ async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existin
       }).filter(Boolean) as { name: string; spend: number; roas: number }[]
 
       // Recommend negating only in campaigns where ROAS < 1.0
-      const recCamps = campBreakdown.filter(c => c.roas < 1.0).map(c => c.name)
+      // Only recommend negating in campaigns with meaningful spend ($10+) and ROAS < 1.0
+      const recCamps = campBreakdown.filter(c => c.roas < 1.0 && c.spend >= 10).map(c => c.name)
 
       // Priority: ROAS < 1.0 always → HIGH (these already filtered to roas < 1.0)
       const priority = row.roas < 1.0 ? 'HIGH' : 'MEDIUM'

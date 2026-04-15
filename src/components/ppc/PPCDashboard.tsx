@@ -107,11 +107,22 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
               return (
                 <button key={c}
                   onClick={() => onUpdate(keyStr, 'campaigns', inList ? (d.campaigns ?? []).filter((x: string) => x !== c) : [...(d.campaigns ?? []), c])}
-                  title={isRec ? `Recommended: ROAS < 1.0 in "${c}" — negate here` : `Not recommended: converting in "${c}" — leave alone`}
+                  title={(() => {
+                    const isAuto  = c.toLowerCase().includes('auto')
+                    const isBroad = c.toLowerCase().includes('broad')
+                    const spend = isAuto ? row.auto_spend : isBroad ? row.broad_spend : null
+                    const roas  = isAuto ? row.auto_roas  : isBroad ? row.broad_roas  : null
+                    const spendStr = spend != null ? `$${spend.toFixed(2)} spend` : ''
+                    const roasStr  = roas  != null ? `ROAS ${roas.toFixed(2)}x`   : ''
+                    const perf = [spendStr, roasStr].filter(Boolean).join(' · ')
+                    return isRec
+                      ? `${c}${perf ? ` — ${perf}` : ''} — ROAS < 1.0, negate here`
+                      : `${c}${perf ? ` — ${perf}` : ''} — converting, leave alone`
+                  })()}
                   style={{ fontSize: 11, padding: '3px 9px', borderRadius: 5, cursor: 'pointer', border, background: bg, color, fontWeight: isRec ? 600 : 400, display: 'flex', alignItems: 'center', gap: 3 }}>
                   {isRec && !inList && <span style={{ fontSize: 9 }}>⚠</span>}
                   {c}
-                  {!isRec && inList && <span style={{ fontSize: 9, opacity: 0.7 }} title="Converting here — are you sure?">✓override</span>}
+                  {!isRec && inList && <span style={{ fontSize: 9, opacity: 0.7 }}>✓override</span>}
                 </button>
               )
             })}
@@ -628,9 +639,10 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
             <div style={{ marginBottom: 18 }}>
               <SectionTitle label="⚡ Toxic combinations — phrase negatives" sub="Each word converts well alone but ROAS < 1.0 combined" color="#ea580c" />
               <div style={{ fontSize:11, color:'var(--text3)', marginBottom:8, paddingLeft:16 }}>
-                Negate as phrase in campaigns where spend is negative. Negating the phrase won't block the individual words from converting.
+                Negate as phrase in campaigns where spend is meaningful ($10+). Negating the phrase won't block the individual words from converting.
+                {toxic_combos.length > 3 && <span style={{ marginLeft:6, color:'var(--accent)' }}>Showing top 3 of {toxic_combos.length} — see N-gram tables for full list.</span>}
               </div>
-              {toxic_combos.map((row: any) => (
+              {(toxic_combos.slice(0, 3)).map((row: any) => (
                 <div key={row.ngram} style={{ border:`1px solid ${selected.has(`toxic_${row.ngram}`) ? 'var(--accent)' : 'rgba(234,88,12,.25)'}`, borderRadius:8, background: selected.has(`toxic_${row.ngram}`) ? 'var(--accent-light)' : 'rgba(234,88,12,.03)', padding:'10px 14px', marginBottom:5 }}>
                   {/* Top row */}
                   <div style={{ display:'flex', alignItems:'center', gap:10 }}>
@@ -652,7 +664,8 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
                           <span key={c.name} style={{ fontSize:11, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:5, padding:'2px 8px' }}>
                             <span style={{ fontWeight:600 }}>{c.name}</span>
                             <span style={{ color:'var(--text3)', marginLeft:6 }}>${c.spend.toFixed(2)} · ROAS {c.roas.toFixed(2)}x</span>
-                            {c.roas < 1.0 && <span style={{ color:'#dc2626', marginLeft:4, fontWeight:600 }}>← negate here</span>}
+                            {c.roas < 1.0 && c.spend >= 10 && <span style={{ color:'#dc2626', marginLeft:4, fontWeight:600 }}>← negate here</span>}
+                            {c.roas < 1.0 && c.spend < 10 && <span style={{ color:'var(--text3)', marginLeft:4, fontSize:10 }}>low spend</span>}
                           </span>
                         ))}
                       </div>
