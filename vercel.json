@@ -1,0 +1,10 @@
+{
+  "functions": {
+    "src/app/api/ppc/analyse/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/ppc/upload/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}
