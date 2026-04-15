@@ -1,6 +1,6 @@
 // app/api/ppc/analyse/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
 
 interface SearchTermRow {
   search_term: string
@@ -87,7 +87,7 @@ function genericFlag(term: string): string {
   return ''
 }
 
-async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[]) {
+export async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[]) {
   const campaigns = [...new Set(rows.map(r => r.campaign_name))]
 
   // Portfolio aggregation
@@ -233,10 +233,9 @@ async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existin
 // ── API ROUTE ─────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
-    	const supabase = createClient()
-	const { data: { session } } = await supabase.auth.getSession()
-	if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-	const user = session.user
+    const supabase = createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { upload_ids, date_range_days, org_id, brand, run_name } = await request.json()
     if (!upload_ids?.length || !date_range_days || !org_id) {

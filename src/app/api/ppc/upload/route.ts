@@ -1,6 +1,6 @@
 // app/api/ppc/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
 import * as XLSX from 'xlsx'
 
 const COLUMN_MAP: Record<string, string[]> = {
@@ -34,10 +34,9 @@ function parseFile(buffer: Buffer): Record<string, any>[] {
 
 export async function POST(request: NextRequest) {
   try {
-    	const supabase = createClient()
-	const { data: { session } } = await supabase.auth.getSession()
-	if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-	const user = session.user
+    const supabase = createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const formData = await request.formData()
     const files           = formData.getAll('files') as File[]
