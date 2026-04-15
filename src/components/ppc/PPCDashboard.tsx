@@ -374,6 +374,27 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, onBack, onGoDeci
         const json = await res.json()
         if (!res.ok) throw new Error(json.error)
         setResults(json.results); setRunId(json.analysis_run_id)
+
+        // Pre-populate decision map from previously logged decisions on this run
+        if (json.existing_decisions?.length) {
+          const preMap = new Map<string, any>()
+          for (const d of json.existing_decisions) {
+            // Build the same key format used by the UI
+            let key = ''
+            if (d.match_type === 'negative_phrase') key = `neg_phrase_${d.term}`
+            else if (d.match_type === 'negative_exact') key = `neg_exact_${d.term}`
+            else key = `harvest_${d.match_type.replace('harvest_','')}_ ${d.term}`
+            preMap.set(key, { status: d.status, campaigns: d.campaign_names ?? [], notes: d.notes ?? '' })
+          }
+          setDecisionMap(preMap)
+          // Auto-select all terms that already have a decision logged
+          setSelected(new Set(preMap.keys()))
+        }
+
+        if (json.is_duplicate_run) {
+          setToast('ℹ️ Same data as a previous run — existing decisions loaded')
+          setTimeout(() => setToast(''), 5000)
+        }
         const prior = ((prevRes as any).data ?? []).find((r: any) => r.id !== json.analysis_run_id) ?? null
         if (prior) {
           setPrevRun(prior)
@@ -850,45 +871,57 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
           <div className="empty" style={{ height:120 }}><div className="ei">🎯</div><div>No analysis runs yet — upload your first search term report</div></div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-            {recentRuns.map(run => (
-              <div key={run.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:13, fontWeight:600 }}>{run.run_name}</div>
-                  <div style={{ fontSize:11, color:'var(--text3)', marginTop:3, display:'flex', gap:14, flexWrap:'wrap' as const }}>
-                    {run.brand && <span style={{ color:'var(--accent)', fontWeight:600 }}>{run.brand}</span>}
-                    <span>{run.date_range_days}-day</span>
-                    <span>${run.total_spend?.toFixed(2)} spend</span>
-                    <span style={{ color:'var(--red)', fontWeight:600 }}>${run.total_wasted?.toFixed(2)} wasted</span>
-                    <span style={{ color:'#dc2626' }}>{run.high_negatives} HIGH negatives</span>
-                    <span style={{ color:'var(--accent)' }}>{run.harvest_candidates} harvest candidates</span>
-                    <span style={{ color:'var(--text3)' }}>{new Date(run.run_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>
+            {/* Deduplicate: show only the latest run per unique upload_ids combination */}
+            {(() => {
+              const seen = new Set<string>()
+              const deduped = recentRuns.filter(run => {
+                const key = [...(run.upload_ids ?? [])].sort().join(',')
+                if (seen.has(key)) return false
+                seen.add(key); return true
+              })
+              return deduped.map(run => {
+                // Count how many times this exact data was run
+                const dupeCount = recentRuns.filter(r => [...(r.upload_ids??[])].sort().join(',') === [...(run.upload_ids??[])].sort().join(',')).length
+                return (
+                  <div key={run.id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:8, padding:'12px 16px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                        <span style={{ fontSize:13, fontWeight:600 }}>{run.run_name}</span>
+                        {dupeCount > 1 && (
+                          <span style={{ fontSize:10, color:'var(--text3)', background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:4, padding:'1px 6px' }}>
+                            run {dupeCount}× — showing latest
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize:11, color:'var(--text3)', marginTop:3, display:'flex', gap:14, flexWrap:'wrap' as const }}>
+                        {run.brand && <span style={{ color:'var(--accent)', fontWeight:600 }}>{run.brand}</span>}
+                        <span>{run.date_range_days}-day</span>
+                        <span>${run.total_spend?.toFixed(2)} spend</span>
+                        <span style={{ color:'var(--red)', fontWeight:600 }}>${run.total_wasted?.toFixed(2)} wasted</span>
+                        <span style={{ color:'#dc2626' }}>{run.high_negatives} HIGH negatives</span>
+                        <span style={{ color:'var(--accent)' }}>{run.harvest_candidates} harvest candidates</span>
+                        <span style={{ color:'var(--text3)' }}>{new Date(run.run_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}</span>
+                      </div>
+                    </div>
+                    <div style={{ display:'flex', gap:8, flexShrink:0, marginLeft:16 }}>
+                      <button className="btn-secondary" style={{ fontSize:11, padding:'5px 12px' }}
+                        onClick={() => {
+                          if (run.upload_ids?.length) {
+                            setUploadIds(run.upload_ids); setUploadDays(run.date_range_days)
+                            setUploadBrand(run.brand ?? ''); setView('analysis')
+                          }
+                        }}>
+                        ⚙️ Re-open analysis
+                      </button>
+                      <button className="btn-secondary" style={{ fontSize:11, padding:'5px 12px' }}
+                        onClick={() => { setDecisionsRunId(run.id); setView('decisions') }}>
+                        📋 View decisions
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div style={{ display:'flex', gap:8, flexShrink:0, marginLeft:16 }}>
-                  <button
-                    className="btn-secondary"
-                    style={{ fontSize:11, padding:'5px 12px' }}
-                    onClick={() => {
-                      if (run.upload_ids?.length) {
-                        setUploadIds(run.upload_ids)
-                        setUploadDays(run.date_range_days)
-                        setUploadBrand(run.brand ?? '')
-                        setView('analysis')
-                      }
-                    }}
-                  >
-                    ⚙️ Re-open analysis
-                  </button>
-                  <button
-                    className="btn-secondary"
-                    style={{ fontSize:11, padding:'5px 12px' }}
-                    onClick={() => { setDecisionsRunId(run.id); setView('decisions') }}
-                  >
-                    📋 View decisions
-                  </button>
-                </div>
-              </div>
-            ))}
+                )
+              })
+            })()}
           </div>
         )
       }

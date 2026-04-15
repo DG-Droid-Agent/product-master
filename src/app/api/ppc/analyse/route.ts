@@ -254,26 +254,64 @@ export async function POST(request: NextRequest) {
     const existingKeywords = [...new Set(termRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
     const results = await runAnalysis(termRows as SearchTermRow[], date_range_days, existingKeywords)
 
-    const { data: runData, error: runError } = await supabase
+    // ── DUPLICATE RUN DETECTION ───────────────────────────────────────────────
+    // Same upload_ids array = identical data. Find existing run and reuse it
+    // rather than creating a new duplicate entry.
+    const sortedIds = [...upload_ids].sort()
+    const { data: existingRuns } = await supabase
       .from('ppc_analysis_runs')
-      .insert({
-        org_id, brand: brand ?? null,
-        run_name: run_name ?? `Analysis ${new Date().toLocaleDateString('en-GB')}`,
-        upload_ids, date_range_days,
-        portfolio_roas:    results.summary.overall_roas,
-        total_spend:       results.summary.total_spend,
-        total_wasted:      results.summary.total_wasted,
-        total_terms:       results.summary.total_terms,
-        high_negatives:    results.phrase_high.length,
-        medium_negatives:  results.phrase_medium.length,
-        harvest_candidates: results.harvest_candidates.length,
-        run_by: user.id,
-      })
-      .select().single()
+      .select('id, upload_ids, run_at')
+      .eq('org_id', org_id)
+      .eq('brand', brand ?? null)
+      .order('run_at', { ascending: false })
+      .limit(20)
 
-    if (runError) throw runError
+    const duplicate = existingRuns?.find(r => {
+      const sorted = [...(r.upload_ids ?? [])].sort()
+      return sorted.length === sortedIds.length && sorted.every((id: string, i: number) => id === sortedIds[i])
+    })
 
-    return NextResponse.json({ analysis_run_id: runData.id, results })
+    let runData: any
+    if (duplicate) {
+      // Reuse existing run — just return it, don't create a new one
+      runData = duplicate
+    } else {
+      // Fresh combination of uploads — create a new run
+      const { data: inserted, error: runError } = await supabase
+        .from('ppc_analysis_runs')
+        .insert({
+          org_id, brand: brand ?? null,
+          run_name: run_name ?? `Analysis ${new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })}`,
+          upload_ids, date_range_days,
+          portfolio_roas:    results.summary.overall_roas,
+          total_spend:       results.summary.total_spend,
+          total_wasted:      results.summary.total_wasted,
+          total_terms:       results.summary.total_terms,
+          high_negatives:    results.phrase_high.length,
+          medium_negatives:  results.phrase_medium.length,
+          harvest_candidates: results.harvest_candidates.length,
+          run_by: user.id,
+        })
+        .select().single()
+      if (runError) throw runError
+      runData = inserted
+    }
+
+    // ── CARRY FORWARD EXISTING DECISIONS ─────────────────────────────────────
+    // Pull all decisions already logged for this run so the UI can pre-populate
+    // status/campaigns/notes without the user having to re-enter them.
+    const { data: existingDecisions } = await supabase
+      .from('ppc_decisions_log')
+      .select('term, match_type, status, campaign_names, notes, is_generic_flag, decided_at')
+      .eq('analysis_run_id', runData.id)
+      .order('decided_at', { ascending: false })
+
+    return NextResponse.json({
+      analysis_run_id: runData.id,
+      is_duplicate_run: !!duplicate,
+      existing_decisions: existingDecisions ?? [],
+      results,
+    })
 
   } catch (err: any) {
     console.error('PPC analysis error:', err)
