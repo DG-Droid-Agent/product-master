@@ -10,8 +10,9 @@ import CostMaster from './CostMaster'
 import UpcManager from './UpcManager'
 import Pipeline from './Pipeline'
 import InventoryDashboard from './inventory/InventoryDashboard'
+import PPCDashboard from './ppc/PPCDashboard'
 
-type Tab = 'catalog' | 'pipeline' | 'upc' | 'costs' | 'inventory'
+type Tab = 'catalog' | 'pipeline' | 'upc' | 'costs' | 'inventory' | 'ppc'
 
 export default function AppShell({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   const supabase = createClient()
@@ -176,16 +177,17 @@ export default function AppShell({ user, onSignOut }: { user: User; onSignOut: (
         </div>
 
         <div className="s-section">Views</div>
-        {(['catalog','pipeline','upc','costs','inventory'] as Tab[]).map(t => (
+        {(['catalog','pipeline','upc','costs','inventory','ppc'] as Tab[]).map(t => (
           <div key={t} className={`s-nav ${tab === t ? 'active' : ''}`} onClick={() => setTab(t)}>
-            {t === 'catalog' ? '📦' : t === 'pipeline' ? '🔄' : t === 'upc' ? '🏷️' : t === 'costs' ? '💰' : '📊'}
-            {' '}{t === 'catalog' ? 'Products' : t === 'pipeline' ? 'Pipeline' : t === 'upc' ? 'UPC Manager' : t === 'costs' ? 'Cost Master' : 'Inventory Planner'}
+            {t === 'catalog' ? '📦' : t === 'pipeline' ? '🔄' : t === 'upc' ? '🏷️' : t === 'costs' ? '💰' : t === 'inventory' ? '📊' : '🎯'}
+{' '}{t === 'catalog' ? 'Products' : t === 'pipeline' ? 'Pipeline' : t === 'upc' ? 'UPC Manager' : t === 'costs' ? 'Cost Master' : t === 'inventory' ? 'Inventory Planner' : 'PPC Manager'}
             <span className="s-badge">
               {t === 'catalog'   && activeProducts.length}
               {t === 'pipeline'  && pipelineProducts.length}
               {t === 'upc'       && 'pools'}
               {t === 'costs'     && costs.length}
               {t === 'inventory' && 'new'}
+	      {t === 'ppc' && 'new'}
             </span>
           </div>
         ))}
@@ -300,6 +302,9 @@ export default function AppShell({ user, onSignOut }: { user: User; onSignOut: (
               {tab === 'inventory' && (
                 <InventoryDashboard userEmail={user.email ?? ''} />
               )}
+		{tab === 'ppc' && (
+ 					 <PPCDashboard userEmail={user.email ?? ''} />
+		)}
             </>
           )}
         </div>
