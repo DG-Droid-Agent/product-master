@@ -3,7 +3,7 @@
 // Decisions log — filterable by brand, ASIN, status, match type.
 // Allows bulk status updates.
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 
@@ -29,8 +29,6 @@ const MATCH_TYPE_COLORS: Record<string, string> = {
   harvest_phrase:  'bg-green-100 text-green-800',
   harvest_broad:   'bg-blue-50 text-blue-700',
 }
-
-import { Suspense } from 'react'
 
 function PPCDecisionsPage() {
   const router       = useRouter()
@@ -59,14 +57,14 @@ function PPCDecisionsPage() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
       supabase.from('orgs').select('id').limit(1).single()
-  	.then(({ data }) => {
-   	 if (data?.id) {
-      		setOrgId(data.id)
-      		supabase.from('products').select('brand').then(({ data: b }) => {
-        	if (b) setBrands([...new Set(b.map((r: any) => r.brand).filter(Boolean))].sort())
-     		})
-   	 }
-  	})
+        .then(({ data }) => {
+          if (data?.id) {
+            setOrgId(data.id)
+            supabase.from('products').select('brand').then(({ data: b }) => {
+              if (b) setBrands([...new Set(b.map((r: any) => r.brand).filter(Boolean))].sort())
+            })
+          }
+        })
     })
   }, [])
 
@@ -318,6 +316,7 @@ function PPCDecisionsPage() {
     </div>
   )
 }
+
 export default function PPCDecisionsPageWrapper() {
   return <Suspense fallback={<div className="loading">⟳ Loading…</div>}><PPCDecisionsPage /></Suspense>
 }

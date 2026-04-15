@@ -2,7 +2,7 @@
 // app/ppc/analysis/page.tsx
 // Shows analysis results. Allows bulk-selecting decisions to log.
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 
@@ -33,8 +33,6 @@ const STATUS_OPTIONS = [
   { value: 'actioned',       label: 'Actioned in Amazon' },
   { value: 'not_actioning',  label: 'Not actioning' },
 ]
-
-import { Suspense } from 'react'
 
 function PPCAnalysisPage() {
   const router       = useRouter()
@@ -311,7 +309,7 @@ function PPCAnalysisPage() {
                       status={d.status} campaigns={d.campaigns} notes={d.notes}
                       allCampaigns={summary.campaigns ?? []}
                       onToggle={() => toggleSelect(key)}
-                      onUpdate={(f: string, v: any) => updateDecision(key, f, v)} />
+                      onUpdate={(f, v) => updateDecision(key, f, v)} />
                   )
                 })}
               </div>
@@ -576,6 +574,7 @@ function ExactNegativeRow({ row, rowKey, selected, status, campaigns, notes, all
     </div>
   )
 }
+
 export default function PPCAnalysisPageWrapper() {
   return <Suspense fallback={<div className="loading">⟳ Loading…</div>}><PPCAnalysisPage /></Suspense>
 }
