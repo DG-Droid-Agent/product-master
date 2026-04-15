@@ -30,7 +30,9 @@ const MATCH_TYPE_COLORS: Record<string, string> = {
   harvest_broad:   'bg-blue-50 text-blue-700',
 }
 
-export default function PPCDecisionsPage() {
+import { Suspense } from 'react'
+
+function PPCDecisionsPage() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const supabase     = createClient()
@@ -315,4 +317,7 @@ export default function PPCDecisionsPage() {
       )}
     </div>
   )
+}
+export default function PPCDecisionsPageWrapper() {
+  return <Suspense fallback={<div className="loading">⟳ Loading…</div>}><PPCDecisionsPage /></Suspense>
 }

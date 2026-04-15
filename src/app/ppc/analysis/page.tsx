@@ -34,7 +34,9 @@ const STATUS_OPTIONS = [
   { value: 'not_actioning',  label: 'Not actioning' },
 ]
 
-export default function PPCAnalysisPage() {
+import { Suspense } from 'react'
+
+function PPCAnalysisPage() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const supabase     = createClient()
@@ -573,4 +575,7 @@ function ExactNegativeRow({ row, rowKey, selected, status, campaigns, notes, all
       </div>
     </div>
   )
+}
+export default function PPCAnalysisPageWrapper() {
+  return <Suspense fallback={<div className="loading">⟳ Loading…</div>}><PPCAnalysisPage /></Suspense>
 }
