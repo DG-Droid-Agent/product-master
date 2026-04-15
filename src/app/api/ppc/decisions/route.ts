@@ -4,9 +4,10 @@ import { createClient } from '@/lib/supabase'
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    	const supabase = createClient()
+	const { data: { session } } = await supabase.auth.getSession()
+	if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+	const user = session.user
 
     const { searchParams } = new URL(request.url)
     const orgId     = searchParams.get('org_id')

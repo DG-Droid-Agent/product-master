@@ -1,18 +1,17 @@
 'use client'
 // app/ppc/upload/page.tsx
-// Upload search term report files, tag campaigns, confirm date range.
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 
 const CAMPAIGN_TYPES = ['auto', 'broad', 'exact', 'phrase', 'other']
-const DATE_RANGE_OPTIONS = [
-  { label: '7 days',       value: 7 },
-  { label: '30 days',      value: 30 },
-  { label: '60 days',      value: 60 },
-  { label: '65 days',      value: 65 },
-  { label: 'Custom range', value: 0 },
+const DATE_RANGES = [
+  { label: '7 days',  value: 7  },
+  { label: '30 days', value: 30 },
+  { label: '60 days', value: 60 },
+  { label: '65 days', value: 65 },
+  { label: 'Custom',  value: 0  },
 ]
 
 interface FileEntry {
@@ -22,111 +21,122 @@ interface FileEntry {
   error: string | null
 }
 
+function inferType(name: string): string {
+  const n = name.toLowerCase()
+  if (n.includes('auto'))   return 'auto'
+  if (n.includes('broad'))  return 'broad'
+  if (n.includes('exact'))  return 'exact'
+  if (n.includes('phrase')) return 'phrase'
+  return 'other'
+}
+
+function cleanName(filename: string): string {
+  return filename
+    .replace(/\.(csv|xlsx)$/i, '')
+    .replace(/sponsored_products_searchterm[_\w]*/i, '')
+    .replace(/apr_\d+_\d+/i, '')
+    .replace(/__+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_/g, ' ')
+    .trim() || filename.replace(/\.(csv|xlsx)$/i, '')
+}
+
 export default function PPCUploadPage() {
-  const router  = useRouter()
-  const supabase = createClient()
+  const router       = useRouter()
+  const supabase     = createClient()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [brand, setBrand]           = useState<string>('')
-  const [brands, setBrands]         = useState<string[]>([])
-  const [asin, setAsin]             = useState('')
-  const [fileEntries, setFileEntries] = useState<FileEntry[]>([])
-  const [dateRangeDays, setDateRangeDays] = useState<number>(65)
-  const [reportStartDate, setReportStartDate] = useState('')
-  const [reportEndDate, setReportEndDate]     = useState('')
-  const [uploading, setUploading]   = useState(false)
-  const [error, setError]           = useState<string | null>(null)
-  const [dragOver, setDragOver]     = useState(false)
+  const [brand, setBrand]         = useState('')
+  const [brands, setBrands]       = useState<string[]>([])
+  const [asin, setAsin]           = useState('')
+  const [entries, setEntries]     = useState<FileEntry[]>([])
+  const [dateRange, setDateRange] = useState(65)
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate]     = useState('')
+  const [dragOver, setDragOver]   = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError]         = useState<string | null>(null)
 
-  // Load brands on mount
   useState(() => {
     supabase.from('products').select('brand').then(({ data }) => {
       if (data) setBrands([...new Set(data.map((r: any) => r.brand).filter(Boolean))].sort())
     })
   })
 
-  const addFiles = useCallback((newFiles: File[]) => {
-    const entries: FileEntry[] = newFiles.map(f => ({
-      file: f,
-      campaignName: f.name.replace(/\.(csv|xlsx)$/i, '').replace(/_/g, ' '),
-      campaignType: f.name.toLowerCase().includes('auto') ? 'auto'
-        : f.name.toLowerCase().includes('broad') ? 'broad'
-        : f.name.toLowerCase().includes('exact') ? 'exact'
-        : 'other',
-      error: null,
-    }))
-    setFileEntries(prev => [...prev, ...entries])
+  const addFiles = useCallback((files: File[]) => {
+    const valid = files.filter(f => /\.(csv|xlsx)$/i.test(f.name))
+    if (!valid.length) return
+    setEntries(prev => {
+      const existing = new Set(prev.map(e => e.file.name))
+      const fresh = valid
+        .filter(f => !existing.has(f.name))
+        .map(f => ({ file: f, campaignName: cleanName(f.name), campaignType: inferType(f.name), error: null }))
+      return [...prev, ...fresh]
+    })
   }, [])
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    const files = Array.from(e.dataTransfer.files).filter(f => /\.(csv|xlsx)$/i.test(f.name))
-    if (files.length) addFiles(files)
-  }
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.length) {
+      addFiles(Array.from(e.target.files))
+      e.target.value = ''
+    }
+  }, [addFiles])
 
-  const updateEntry = (index: number, field: keyof FileEntry, value: string) => {
-    setFileEntries(prev => prev.map((e, i) => i === index ? { ...e, [field]: value } : e))
-  }
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setDragOver(false)
+    addFiles(Array.from(e.dataTransfer.files))
+  }, [addFiles])
 
-  const removeEntry = (index: number) => {
-    setFileEntries(prev => prev.filter((_, i) => i !== index))
-  }
+  const updateEntry = (i: number, field: keyof FileEntry, value: string) =>
+    setEntries(prev => prev.map((e, idx) => idx === i ? { ...e, [field]: value, error: null } : e))
 
-  const validate = () => {
-    let valid = true
-    setFileEntries(prev => prev.map(e => {
-      if (!e.campaignName.trim()) {
-        valid = false
-        return { ...e, error: 'Campaign name required' }
-      }
-      return { ...e, error: null }
+  const removeEntry = (i: number) =>
+    setEntries(prev => prev.filter((_, idx) => idx !== i))
+
+  const validate = (): boolean => {
+    if (!brand.trim())   { setError('Select a brand'); return false }
+    if (!entries.length) { setError('Add at least one file'); return false }
+    if (!dateRange)      { setError('Select a date range'); return false }
+    let ok = true
+    setEntries(prev => prev.map(e => {
+      if (!e.campaignName.trim()) { ok = false; return { ...e, error: 'Required' } }
+      return e
     }))
-    if (!brand.trim())    { setError('Select a brand'); return false }
-    if (!fileEntries.length) { setError('Add at least one file'); return false }
-    if (!dateRangeDays)   { setError('Select a date range'); return false }
-    return valid
+    if (!ok) { setError('Fill in all campaign names'); return false }
+    return true
   }
 
   const handleUpload = async () => {
+    setError(null)
     if (!validate()) return
     setUploading(true)
-    setError(null)
-
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not signed in — please sign in and try again')
+      const { data: org } = await supabase.from('orgs').select('id').limit(1).single()
+      if (!org) throw new Error('No organisation found')
 
-      const { data: orgMember } = await supabase
-        .from('orgs').select('id').limit(1).single()
-      if (!orgMember) throw new Error('No organisation found')
+      const form = new FormData()
+      entries.forEach(e => form.append('files', e.file))
+      form.append('org_id',          org.id)
+      form.append('brand',           brand)
+      form.append('asin',            asin)
+      form.append('campaign_names',  JSON.stringify(entries.map(e => e.campaignName.trim())))
+      form.append('campaign_types',  JSON.stringify(entries.map(e => e.campaignType)))
+      form.append('date_range_days', String(dateRange))
+      if (startDate) form.append('report_start_date', startDate)
+      if (endDate)   form.append('report_end_date',   endDate)
 
-      const formData = new FormData()
-      fileEntries.forEach(e => formData.append('files', e.file))
-      formData.append('org_id',         orgMember.id)
-      formData.append('brand',       brand)
-      formData.append('asin',           asin)
-      formData.append('campaign_names', JSON.stringify(fileEntries.map(e => e.campaignName.trim())))
-      formData.append('campaign_types', JSON.stringify(fileEntries.map(e => e.campaignType)))
-      formData.append('date_range_days', String(dateRangeDays))
-      if (reportStartDate) formData.append('report_start_date', reportStartDate)
-      if (reportEndDate)   formData.append('report_end_date',   reportEndDate)
-
-      const res = await fetch('/api/ppc/upload', { method: 'POST', body: formData })
+      const res  = await fetch('/api/ppc/upload', { method: 'POST', body: form })
       const json = await res.json()
-
       if (!res.ok) {
-        if (json.duplicate) {
-          setError(`Duplicate detected: "${json.campaign_name}" for this date range is already uploaded. Choose a different date range or delete the existing upload.`)
-        } else {
-          throw new Error(json.error ?? 'Upload failed')
-        }
+        setError(json.duplicate
+          ? `Duplicate: "${json.campaign_name}" for this date range already exists.`
+          : json.error ?? 'Upload failed')
         return
       }
-
-      // Navigate to analysis page with the new upload IDs
-      const uploadIds = json.uploads.map((u: any) => u.upload_id).join(',')
-      router.push(`/ppc/analysis?upload_ids=${uploadIds}&date_range_days=${dateRangeDays}&brand=${encodeURIComponent(brand ?? '')}`)
-
+      const ids = json.uploads.map((u: any) => u.upload_id).join(',')
+      router.push(`/ppc/analysis?upload_ids=${ids}&date_range_days=${dateRange}&brand=${encodeURIComponent(brand)}`)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -134,174 +144,183 @@ export default function PPCUploadPage() {
     }
   }
 
+  const sectionStyle: React.CSSProperties = {
+    background: 'var(--surface)', border: '1px solid var(--border)',
+    borderRadius: 8, padding: 16, marginBottom: 12,
+  }
+  const labelStyle: React.CSSProperties = {
+    fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const,
+    letterSpacing: '.07em', color: 'var(--text3)', marginBottom: 12, display: 'block',
+  }
+  const inputStyle: React.CSSProperties = {
+    width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)',
+    borderRadius: 6, padding: '7px 10px', fontSize: 13, color: 'var(--text)',
+    boxSizing: 'border-box' as const,
+  }
+
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-gray-900">PPC — Upload search term reports</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Upload one or more search term report files to run negative targeting and keyword harvesting analysis.
-          You can combine multiple campaigns from the same portfolio into a single analysis.
-        </p>
+    <div style={{ padding: 24, maxWidth: 680 }}>
+
+      {/* Back + title */}
+      <button onClick={() => router.push('/ppc')}
+        style={{ fontSize: 11, color: 'var(--text3)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 10 }}>
+        ← PPC Manager
+      </button>
+      <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Upload search term reports</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 20 }}>
+        Drop one or more files to run negative targeting and keyword harvesting analysis.
+        Hold <kbd style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 3, padding: '1px 5px', fontSize: 11 }}>Ctrl</kbd> when selecting to pick multiple files at once.
       </div>
 
-      {/* Brand + ASIN */}
-      <div className="bg-white border border-gray-200 rounded-lg p-5 mb-4">
-        <h2 className="text-sm font-medium text-gray-700 mb-3">1. Brand & product</h2>
-        <div className="grid grid-cols-2 gap-4">
+      {/* 1 · Brand */}
+      <div style={sectionStyle}>
+        <span style={labelStyle}>1 · Brand &amp; product</span>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Brand <span className="text-red-500">*</span></label>
-            <select
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-              value={brand}
-              onChange={e => setBrand(e.target.value)}
-            >
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>Brand <span style={{ color: 'var(--red)' }}>*</span></div>
+            <select value={brand} onChange={e => setBrand(e.target.value)} style={inputStyle}>
               <option value="">Select brand…</option>
               {brands.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">ASIN (optional — for product-level tracking)</label>
-            <input
-              type="text"
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm font-mono"
-              placeholder="B0XXXXXXXXX"
-              value={asin}
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>ASIN <span style={{ color: 'var(--text3)' }}>(optional)</span></div>
+            <input type="text" placeholder="B0XXXXXXXXX" value={asin}
               onChange={e => setAsin(e.target.value.toUpperCase())}
-            />
+              style={{ ...inputStyle, fontFamily: 'var(--mono)' }} />
           </div>
         </div>
       </div>
 
-      {/* Date range */}
-      <div className="bg-white border border-gray-200 rounded-lg p-5 mb-4">
-        <h2 className="text-sm font-medium text-gray-700 mb-3">2. Date range</h2>
-        <p className="text-xs text-gray-500 mb-3">
-          This affects significance thresholds. Make sure it matches the date range you set in Amazon when downloading the report.
-        </p>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {DATE_RANGE_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-                dateRangeDays === opt.value
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
-              }`}
-              onClick={() => setDateRangeDays(opt.value)}
-            >
-              {opt.label}
-            </button>
+      {/* 2 · Date range */}
+      <div style={sectionStyle}>
+        <span style={labelStyle}>2 · Date range</span>
+        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>
+          Must match the date range you set in Amazon when exporting the report.
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' as const, marginBottom: 12 }}>
+          {DATE_RANGES.map(opt => (
+            <button key={opt.value} onClick={() => setDateRange(opt.value)} style={{
+              padding: '6px 14px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+              background: dateRange === opt.value ? 'var(--accent)' : 'var(--surface2)',
+              color:      dateRange === opt.value ? '#fff' : 'var(--text)',
+              border:     `1px solid ${dateRange === opt.value ? 'var(--accent)' : 'var(--border)'}`,
+              fontWeight: dateRange === opt.value ? 600 : 400,
+            }}>{opt.label}</button>
           ))}
         </div>
-        {dateRangeDays === 0 && (
-          <div className="grid grid-cols-2 gap-4 mt-2">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Start date</label>
-              <input type="date" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">End date</label>
-              <input type="date" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} />
-            </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>Start date (optional)</div>
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={inputStyle} />
           </div>
-        )}
-        {dateRangeDays > 0 && (
-          <div className="grid grid-cols-2 gap-4 mt-2">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Report start date (optional)</label>
-              <input type="date" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Report end date (optional)</label>
-              <input type="date" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} />
-            </div>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 4 }}>End date (optional)</div>
+            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} style={inputStyle} />
           </div>
-        )}
+        </div>
       </div>
 
-      {/* File drop zone */}
-      <div className="bg-white border border-gray-200 rounded-lg p-5 mb-4">
-        <h2 className="text-sm font-medium text-gray-700 mb-3">3. Upload files</h2>
+      {/* 3 · Files */}
+      <div style={sectionStyle}>
+        <span style={labelStyle}>3 · Upload files</span>
+
+        {/* Drop zone — click triggers ref, no nested input */}
         <div
-          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
-            dragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
-          }`}
           onDragOver={e => { e.preventDefault(); setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          onClick={() => document.getElementById('file-input')?.click()}
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: 8, padding: '24px 20px', textAlign: 'center' as const,
+            cursor: 'pointer', transition: 'all .15s',
+            background: dragOver ? 'var(--accent-light)' : 'var(--surface2)',
+            marginBottom: entries.length ? 12 : 0,
+          }}
         >
-          <div className="text-3xl mb-2">📂</div>
-          <p className="text-sm text-gray-600">Drop CSV or XLSX files here, or click to browse</p>
-          <p className="text-xs text-gray-400 mt-1">You can drop multiple files at once for portfolio analysis</p>
-          <input
-            id="file-input" type="file" multiple accept=".csv,.xlsx" className="hidden"
-            onChange={e => { if (e.target.files) addFiles(Array.from(e.target.files)) }}
-          />
+          <div style={{ fontSize: 26, marginBottom: 8 }}>📂</div>
+          <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>
+            Drop CSV or XLSX files here, or <span style={{ color: 'var(--accent)', textDecoration: 'underline' }}>click to browse</span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+            Select multiple files at once — hold Ctrl (Windows) or Cmd (Mac)
+          </div>
         </div>
 
+        {/* Single hidden input — multiple attribute enables multi-select */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".csv,.xlsx"
+          style={{ display: 'none' }}
+          onChange={handleChange}
+        />
+
         {/* File list */}
-        {fileEntries.length > 0 && (
-          <div className="mt-4 space-y-3">
-            {fileEntries.map((entry, i) => (
-              <div key={i} className="flex gap-3 items-start p-3 bg-gray-50 rounded-lg">
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-500 truncate mb-2">{entry.file.name}</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Campaign name <span className="text-red-500">*</span></label>
-                      <input
-                        type="text"
-                        className={`w-full border rounded px-2 py-1 text-xs ${entry.error ? 'border-red-400' : 'border-gray-300'}`}
-                        value={entry.campaignName}
-                        onChange={e => updateEntry(i, 'campaignName', e.target.value)}
-                        placeholder="e.g. coir_basic_auto"
-                      />
-                      {entry.error && <p className="text-xs text-red-500 mt-0.5">{entry.error}</p>}
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Campaign type</label>
-                      <select
-                        className="w-full border border-gray-300 rounded px-2 py-1 text-xs"
-                        value={entry.campaignType}
-                        onChange={e => updateEntry(i, 'campaignType', e.target.value)}
-                      >
-                        {CAMPAIGN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                    </div>
-                  </div>
+        {entries.map((entry, i) => (
+          <div key={i} style={{
+            background: 'var(--surface2)', borderRadius: 7, padding: 12,
+            border: `1px solid ${entry.error ? 'var(--red)' : 'var(--border)'}`,
+            marginBottom: 8,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: '90%' }}>
+                📄 {entry.file.name}
+              </span>
+              <button onClick={() => removeEntry(i)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 13, padding: 0, flexShrink: 0 }}>
+                ✕
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3 }}>
+                  Campaign name <span style={{ color: 'var(--red)' }}>*</span>
                 </div>
-                <button onClick={() => removeEntry(i)} className="text-gray-400 hover:text-red-500 text-sm mt-1">✕</button>
+                <input type="text" value={entry.campaignName} placeholder="e.g. coir_basic_auto"
+                  onChange={e => updateEntry(i, 'campaignName', e.target.value)}
+                  style={{ ...inputStyle, fontSize: 12, padding: '5px 8px', border: `1px solid ${entry.error ? 'var(--red)' : 'var(--border)'}` }} />
+                {entry.error && <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 2 }}>{entry.error}</div>}
               </div>
-            ))}
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3 }}>Type</div>
+                <select value={entry.campaignType} onChange={e => updateEntry(i, 'campaignType', e.target.value)}
+                  style={{ ...inputStyle, fontSize: 12, padding: '5px 8px' }}>
+                  {CAMPAIGN_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
-        )}
+        ))}
       </div>
 
       {/* Error */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-4 text-sm text-red-700">
-          {error}
+        <div style={{
+          background: 'var(--red-light, rgba(220,38,38,.08))', border: '1px solid var(--red)',
+          borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: 'var(--red)',
+        }}>
+          ⚠️ {error}
         </div>
       )}
 
-      {/* Submit */}
-      <div className="flex justify-between items-center">
-        <button onClick={() => router.push('/ppc')} className="text-sm text-gray-500 hover:text-gray-700">
-          ← Back to PPC
-        </button>
+      {/* Footer actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4 }}>
+        <button className="btn-secondary" onClick={() => router.push('/ppc')}>← Back</button>
         <button
+          className="btn-primary"
           onClick={handleUpload}
-          disabled={uploading || !fileEntries.length}
-          className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={uploading || entries.length === 0}
+          style={{ opacity: uploading || entries.length === 0 ? 0.5 : 1 }}
         >
-          {uploading ? 'Uploading…' : `Upload ${fileEntries.length > 0 ? `${fileEntries.length} file${fileEntries.length > 1 ? 's' : ''} & run analysis` : 'files'}`}
+          {uploading ? '⟳ Uploading…'
+            : entries.length === 0 ? 'Add files to continue'
+            : `Upload ${entries.length} file${entries.length > 1 ? 's' : ''} & run analysis`}
         </button>
       </div>
+
     </div>
   )
 }

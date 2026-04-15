@@ -233,9 +233,10 @@ async function runAnalysis(rows: SearchTermRow[], dateRangeDays: number, existin
 // ── API ROUTE ─────────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    	const supabase = createClient()
+	const { data: { session } } = await supabase.auth.getSession()
+	if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+	const user = session.user
 
     const { upload_ids, date_range_days, org_id, brand, run_name } = await request.json()
     if (!upload_ids?.length || !date_range_days || !org_id) {
