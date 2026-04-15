@@ -1,6 +1,6 @@
 // app/api/ppc/upload/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase'
 import * as XLSX from 'xlsx'
 
 const COLUMN_MAP: Record<string, string[]> = {

@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase'
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   pending:       { label: 'Pending review',         color: 'text-yellow-700', bg: 'bg-yellow-50 border-yellow-200' },

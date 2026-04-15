@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase'
 
 type Priority = 'HIGH' | 'MEDIUM' | 'WATCH'
 type Tab = 'negatives' | 'harvest' | 'ngrams'

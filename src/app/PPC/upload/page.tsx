@@ -4,7 +4,7 @@
 
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase'
 
 const CAMPAIGN_TYPES = ['auto', 'broad', 'exact', 'phrase', 'other']
 const DATE_RANGE_OPTIONS = [

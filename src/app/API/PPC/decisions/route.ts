@@ -1,6 +1,6 @@
 // app/api/ppc/decisions/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase'
 
 export async function GET(request: NextRequest) {
   try {
