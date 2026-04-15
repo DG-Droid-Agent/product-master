@@ -1,4 +1,10 @@
 // app/api/ppc/upload/route.ts
+// [U1] createServerSupabaseClient — fixes 401
+// [U2] brand as text not FK
+// [U3] duplicate upload blocked
+// [U4] batch insert 500 rows
+// NEW: detects bulk Amazon bulk file, splits by portfolio, tags targeting_type + pt_expression
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import * as XLSX from 'xlsx'
@@ -24,7 +30,58 @@ function normaliseColumns(row: Record<string, any>): Record<string, any> {
   return result
 }
 
-function parseFile(buffer: Buffer): Record<string, any>[] {
+function isBulkFile(buffer: Buffer): boolean {
+  try {
+    const wb = XLSX.read(buffer, { type: 'buffer' })
+    return wb.SheetNames.includes('SP Search Term Report')
+  } catch { return false }
+}
+
+function parseBulkFile(buffer: Buffer): { rows: any[]; portfolios: string[] } {
+  const wb  = XLSX.read(buffer, { type: 'buffer' })
+  const ws  = wb.Sheets['SP Search Term Report']
+  const raw = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
+  const rows: any[] = []
+
+  for (const r of raw) {
+    const searchTerm   = String(r['Customer Search Term'] ?? '').trim()
+    const campaignName = String(r['Campaign Name (Informational only)'] ?? '').trim()
+    const portfolio    = String(r['Portfolio Name (Informational only)'] ?? '').trim() || 'Unassigned'
+    const ptId         = r['Product Targeting ID']
+    const ptExpr       = String(r['Product Targeting Expression'] ?? '').trim()
+    const keywordText  = String(r['Keyword Text'] ?? '').trim()
+    const spend        = parseFloat(r['Spend'])       || 0
+    const sales        = parseFloat(r['Sales'])       || 0
+    const orders       = parseInt(r['Orders'])        || 0
+    const impressions  = parseInt(r['Impressions'])   || 0
+    const clicks       = parseInt(r['Clicks'])        || 0
+
+    if (!searchTerm || !campaignName) continue
+
+    const targetingType: 'keyword' | 'pt' = (ptId && String(ptId).trim() !== '') ? 'pt' : 'keyword'
+
+    rows.push({
+      search_term:     searchTerm,
+      campaign_name:   campaignName,
+      portfolio,
+      targeting_type:  targetingType,
+      pt_expression:   targetingType === 'pt' ? ptExpr || null : null,
+      matched_keyword: keywordText || null,
+      cost:            spend,
+      purchases:       orders,
+      sales,
+      roas:            spend > 0 ? sales / spend : 0,
+      impressions,
+      clicks,
+      acos:            sales > 0 ? spend / sales * 100 : spend > 0 ? 100 : 0,
+    })
+  }
+
+  const portfolios = [...new Set(rows.map(r => r.portfolio))].filter(p => p !== 'Unassigned').sort()
+  return { rows, portfolios }
+}
+
+function parseIndividualFile(buffer: Buffer): any[] {
   const wb = XLSX.read(buffer, { type: 'buffer' })
   const sheetName = wb.SheetNames.find(n =>
     n.toLowerCase().includes('search') || n.toLowerCase().includes('sponsored')
@@ -34,14 +91,15 @@ function parseFile(buffer: Buffer): Record<string, any>[] {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const supabase = createServerSupabaseClient()                        // [U1]
+    const { data: { session } } = await supabase.auth.getSession()      // [U5]
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const user = session.user
 
-    const formData = await request.formData()
+    const formData        = await request.formData()
     const files           = formData.getAll('files') as File[]
     const orgId           = formData.get('org_id') as string
-    const brand           = formData.get('brand') as string | null        // text, not FK
+    const brand           = formData.get('brand') as string | null       // [U2] text not FK
     const asin            = formData.get('asin') as string | null
     const campaignNames   = JSON.parse(formData.get('campaign_names') as string ?? '[]') as string[]
     const campaignTypes   = JSON.parse(formData.get('campaign_types') as string ?? '[]') as string[]
@@ -49,94 +107,123 @@ export async function POST(request: NextRequest) {
     const reportStartDate = formData.get('report_start_date') as string | null
     const reportEndDate   = formData.get('report_end_date') as string | null
 
-    if (!files.length || !orgId || !campaignNames.length || isNaN(dateRangeDays)) {
+    if (!files.length || !orgId || isNaN(dateRangeDays)) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
-    }
-    if (files.length !== campaignNames.length) {
-      return NextResponse.json({ error: 'Each file must have a corresponding campaign name' }, { status: 400 })
     }
 
     const uploadResults = []
 
     for (let i = 0; i < files.length; i++) {
-      const file         = files[i]
-      const campaignName = campaignNames[i]
-      const campaignType = campaignTypes[i] ?? 'other'
+      const file   = files[i]
+      const buffer = Buffer.from(await file.arrayBuffer())
+      const bulk   = isBulkFile(buffer)
 
-      // Duplicate check
-      if (reportStartDate && reportEndDate) {
-        const { data: existing } = await supabase
-          .from('ppc_uploads')
-          .select('id')
-          .eq('org_id', orgId)
-          .eq('campaign_name', campaignName)
-          .eq('report_start_date', reportStartDate)
-          .eq('report_end_date', reportEndDate)
-          .maybeSingle()
-
-        if (existing) {
-          return NextResponse.json({
-            error: `Duplicate: "${campaignName}" for this date range already exists. Delete it first or use a different date range.`,
-            duplicate: true,
-            campaign_name: campaignName,
-          }, { status: 409 })
+      if (bulk) {
+        // ── BULK FILE ─────────────────────────────────────────────────────
+        const { rows, portfolios } = parseBulkFile(buffer)
+        if (!rows.length) {
+          return NextResponse.json({ error: `No valid rows in bulk file: ${file.name}` }, { status: 400 })
         }
+
+        const bulkCampaignName = `BULK:${file.name}`
+
+        // [U3] duplicate check
+        if (reportStartDate && reportEndDate) {
+          const { data: existing } = await supabase
+            .from('ppc_uploads').select('id')
+            .eq('org_id', orgId).eq('campaign_name', bulkCampaignName)
+            .eq('report_start_date', reportStartDate).eq('report_end_date', reportEndDate)
+            .maybeSingle()
+          if (existing) {
+            return NextResponse.json({ error: 'Duplicate: this bulk file for this date range was already uploaded.', duplicate: true, campaign_name: bulkCampaignName }, { status: 409 })
+          }
+        }
+
+        const { data: upload, error: uploadError } = await supabase
+          .from('ppc_uploads').insert({
+            org_id: orgId, brand: brand ?? null, asin: asin ?? null,
+            campaign_name: bulkCampaignName, campaign_type: 'other',
+            date_range_days: dateRangeDays,
+            report_start_date: reportStartDate ?? null, report_end_date: reportEndDate ?? null,
+            filename: file.name, row_count: rows.length, uploaded_by: user.id,
+            is_bulk_file: true, portfolios,
+          }).select().single()
+        if (uploadError) throw uploadError
+
+        const termRows = rows.map(r => ({
+          upload_id: upload.id, org_id: orgId, brand: brand ?? null,
+          campaign_name: r.campaign_name, portfolio: r.portfolio,
+          targeting_type: r.targeting_type, pt_expression: r.pt_expression,
+          search_term: r.search_term, matched_keyword: r.matched_keyword,
+          cost: r.cost, purchases: r.purchases, sales: r.sales,
+          roas: r.roas, impressions: r.impressions, clicks: r.clicks, acos: r.acos,
+        }))
+
+        const BATCH = 500  // [U4]
+        for (let j = 0; j < termRows.length; j += BATCH) {
+          const { error } = await supabase.from('ppc_search_terms').insert(termRows.slice(j, j + BATCH))
+          if (error) throw error
+        }
+
+        uploadResults.push({ upload_id: upload.id, campaign_name: bulkCampaignName, row_count: rows.length, is_bulk: true, portfolios })
+
+      } else {
+        // ── INDIVIDUAL FILE ───────────────────────────────────────────────
+        const campaignName = campaignNames[i] ?? file.name.replace(/\.(csv|xlsx)$/i, '')
+        const campaignType = campaignTypes[i] ?? 'other'
+
+        // [U3] duplicate check
+        if (reportStartDate && reportEndDate) {
+          const { data: existing } = await supabase
+            .from('ppc_uploads').select('id')
+            .eq('org_id', orgId).eq('campaign_name', campaignName)
+            .eq('report_start_date', reportStartDate).eq('report_end_date', reportEndDate)
+            .maybeSingle()
+          if (existing) {
+            return NextResponse.json({ error: `Duplicate: "${campaignName}" for this date range already exists.`, duplicate: true, campaign_name: campaignName }, { status: 409 })
+          }
+        }
+
+        const rawRows = parseIndividualFile(buffer)
+        const rows    = rawRows.map(normaliseColumns).filter(r => r.search_term)
+        if (!rows.length) {
+          return NextResponse.json({ error: `No valid rows in: ${file.name}` }, { status: 400 })
+        }
+
+        const { data: upload, error: uploadError } = await supabase
+          .from('ppc_uploads').insert({
+            org_id: orgId, brand: brand ?? null, asin: asin ?? null,
+            campaign_name: campaignName, campaign_type: campaignType,
+            date_range_days: dateRangeDays,
+            report_start_date: reportStartDate ?? null, report_end_date: reportEndDate ?? null,
+            filename: file.name, row_count: rows.length, uploaded_by: user.id,
+            is_bulk_file: false,
+          }).select().single()
+        if (uploadError) throw uploadError
+
+        const termRows = rows.map(r => ({
+          upload_id: upload.id, org_id: orgId, brand: brand ?? null,
+          campaign_name: campaignName, portfolio: null,
+          targeting_type: 'keyword' as const, pt_expression: null,
+          search_term: String(r.search_term).trim(),
+          matched_keyword: r.matched_keyword ? String(r.matched_keyword).trim() : null,
+          cost:        parseFloat(r.cost)      || 0,
+          purchases:   parseInt(r.purchases)   || 0,
+          sales:       parseFloat(r.sales)     || 0,
+          roas:        parseFloat(r.cost) > 0  ? parseFloat(r.sales) / parseFloat(r.cost) : 0,
+          impressions: parseInt(r.impressions) || null,
+          clicks:      parseInt(r.clicks)      || null,
+          acos:        parseFloat(r.sales) > 0 ? parseFloat(r.cost) / parseFloat(r.sales) * 100 : null,
+        }))
+
+        const BATCH = 500  // [U4]
+        for (let j = 0; j < termRows.length; j += BATCH) {
+          const { error } = await supabase.from('ppc_search_terms').insert(termRows.slice(j, j + BATCH))
+          if (error) throw error
+        }
+
+        uploadResults.push({ upload_id: upload.id, campaign_name: campaignName, row_count: rows.length, is_bulk: false, portfolios: [] })
       }
-
-      // Parse file
-      const buffer  = Buffer.from(await file.arrayBuffer())
-      const rawRows = parseFile(buffer)
-      const rows    = rawRows.map(normaliseColumns).filter(r => r.search_term)
-
-      if (!rows.length) {
-        return NextResponse.json({ error: `No valid rows in: ${file.name}` }, { status: 400 })
-      }
-
-      // Save upload record
-      const { data: upload, error: uploadError } = await supabase
-        .from('ppc_uploads')
-        .insert({
-          org_id: orgId,
-          brand:  brand ?? null,
-          asin:   asin ?? null,
-          campaign_name:     campaignName,
-          campaign_type:     campaignType,
-          date_range_days:   dateRangeDays,
-          report_start_date: reportStartDate ?? null,
-          report_end_date:   reportEndDate   ?? null,
-          filename:          file.name,
-          row_count:         rows.length,
-          uploaded_by:       user.id,
-        })
-        .select()
-        .single()
-
-      if (uploadError) throw uploadError
-
-      // Save search term rows in batches
-      const termRows = rows.map(r => ({
-        upload_id:       upload.id,
-        org_id:          orgId,
-        brand:           brand ?? null,
-        campaign_name:   campaignName,
-        search_term:     String(r.search_term).trim(),
-        matched_keyword: r.matched_keyword ? String(r.matched_keyword).trim() : null,
-        cost:            parseFloat(r.cost)      || 0,
-        purchases:       parseInt(r.purchases)   || 0,
-        sales:           parseFloat(r.sales)     || 0,
-        roas:            parseFloat(r.cost) > 0  ? parseFloat(r.sales) / parseFloat(r.cost) : 0,
-        impressions:     parseInt(r.impressions) || null,
-        clicks:          parseInt(r.clicks)      || null,
-        acos:            parseFloat(r.sales) > 0 ? parseFloat(r.cost) / parseFloat(r.sales) * 100 : null,
-      }))
-
-      const BATCH = 500
-      for (let j = 0; j < termRows.length; j += BATCH) {
-        const { error } = await supabase.from('ppc_search_terms').insert(termRows.slice(j, j + BATCH))
-        if (error) throw error
-      }
-
-      uploadResults.push({ upload_id: upload.id, campaign_name: campaignName, row_count: rows.length })
     }
 
     return NextResponse.json({ success: true, uploads: uploadResults })
