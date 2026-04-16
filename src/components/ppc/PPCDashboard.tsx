@@ -459,7 +459,7 @@ function cleanName(f: string) { return f.replace(/\.(csv|xlsx)$/i,'').replace(/s
 
 interface FileEntry { file: File; campaignName: string; campaignType: string; error: string | null }
 
-function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string; onDone: (ids: string[], days: number, brand: string, isBulk: boolean, portfolios: string[], portfolioSummary: any[]) => void }) {
+function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string; onDone: (ids: string[], days: number, brand: string, isBulk: boolean, portfolios: string[], portfolioSummary: any[], donePorts?: string[]) => void }) {
   const supabase = createClient()
   const fileRef  = useRef<HTMLInputElement>(null)
   const [brand, setBrand]         = useState('')
@@ -623,9 +623,17 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
                     .select('portfolios, portfolio_summary')
                     .eq('id', duplicateUploadId)
                     .single()
-                  const portfolios      = upload?.portfolios ?? []
+                  const portfolios       = upload?.portfolios ?? []
                   const portfolioSummary = upload?.portfolio_summary ?? []
-                  onDone([duplicateUploadId!], dateRange, brand, true, portfolios, portfolioSummary)
+                  // Check if any portfolios already analysed
+                  const sb2 = (await import('@/lib/supabase')).createClient()
+                  const { data: doneRuns } = await sb2.from('ppc_analysis_runs')
+                    .select('portfolio')
+                    .eq('is_bulk_run', true)
+                    .not('portfolio', 'is', null)
+                    .not('results_json', 'is', null)
+                  const donePorts = (doneRuns ?? []).map((r: any) => r.portfolio).filter(Boolean)
+                  onDone([duplicateUploadId!], dateRange, brand, true, portfolios, portfolioSummary, donePorts)
                 }}>
                 Run analysis on existing upload →
               </button>
@@ -1473,15 +1481,24 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
     load()
   }, [])
 
-  const handleUploadDone = (ids: string[], days: number, brand: string, isBulk: boolean, portfolios: string[], portfolioSummary: any[]) => {
+  const handleUploadDone = (ids: string[], days: number, brand: string, isBulk: boolean, portfolios: string[], portfolioSummary: any[], donePorts: string[] = []) => {
     setUploadIds(ids); setUploadDays(days); setUploadBrand(brand)
     setUploadIsBulk(isBulk); setUploadPortfolios(portfolios)
     setUploadPortfolioSummary(portfolioSummary)
-    if (isBulk && portfolioSummary.length > 0) {
-      // Pre-select portfolios with $50+ spend by default
-      const preSelected = portfolioSummary.filter(p => p.spend >= 50).map(p => p.name)
-      setSelectedPortfolios(preSelected.length > 0 ? preSelected : portfolioSummary.slice(0, 15).map(p => p.name))
-      setView('portfolio_select')
+    if (isBulk) {
+      if (donePorts.length > 0) {
+        // Already have analyses — go straight to dashboard
+        setSelectedPortfolios([donePorts[0]])
+        setView('analysis')
+      } else if (portfolioSummary.length > 0) {
+        // No analyses yet — show selector
+        const preSelected = portfolioSummary.filter(p => p.spend >= 50).map(p => p.name)
+        setSelectedPortfolios(preSelected.length > 0 ? preSelected : portfolioSummary.slice(0, 5).map(p => p.name))
+        setView('portfolio_select')
+      } else {
+        setSelectedPortfolios([])
+        setView('analysis')
+      }
     } else {
       setSelectedPortfolios([])
       setView('analysis')
@@ -1604,7 +1621,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                             .single()
                           const summary = data?.portfolio_summary ?? []
                           setUploadPortfolioSummary(summary)
-                          // Pre-tick portfolios that have already been analysed
+                          // Check which portfolios are already analysed
                           const { data: runs } = await sb.from('ppc_analysis_runs')
                             .select('portfolio')
                             .eq('org_id', orgId!)
@@ -1612,12 +1629,16 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                             .not('portfolio', 'is', null)
                             .not('results_json', 'is', null)
                           const donePorts = (runs ?? []).map((r: any) => r.portfolio).filter(Boolean)
-                          // Pre-select: already analysed portfolios, or top by spend if none done
-                          const preSelected = donePorts.length > 0
-                            ? summary.filter((p: any) => donePorts.includes(p.name)).map((p: any) => p.name)
-                            : summary.filter((p: any) => p.spend >= 50).map((p: any) => p.name)
-                          setSelectedPortfolios(preSelected)
-                          setView('portfolio_select')
+                          if (donePorts.length > 0) {
+                            // Already have analyses — go straight to dashboard showing first done portfolio
+                            setSelectedPortfolios([donePorts[0]])
+                            setView('analysis')
+                          } else {
+                            // No analyses yet — show selector pre-ticked with top spend portfolios
+                            const preSelected = summary.filter((p: any) => p.spend >= 50).map((p: any) => p.name)
+                            setSelectedPortfolios(preSelected.length > 0 ? preSelected : summary.slice(0, 5).map((p: any) => p.name))
+                            setView('portfolio_select')
+                          }
                         } else {
                           // Individual: use the run's portfolio name directly
                           setSelectedPortfolios(run.portfolio ? [run.portfolio] : [''])
