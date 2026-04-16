@@ -673,6 +673,8 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const [histExp, setHistExp]         = useState(false)
 
   const runAnalysis = useCallback(async (force = false) => {
+    // Guard: if no portfolio selected, redirect to selector
+    if (isBulk && !portfolio) { onSelectMore(); return }
     setLoading(true); setLoadError(''); setProgress(0)
 
     // Simulate progress steps while waiting for the API
@@ -762,7 +764,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
         }
     } catch (err: any) { clearInterval(ticker); setLoadError(err.message) }
     finally { setLoading(false) }
-  }, [uploadIds, dateRangeDays, orgId, brand, isBulk])  // useCallback deps
+  }, [uploadIds, dateRangeDays, orgId, brand, isBulk, portfolio])  // useCallback deps
 
   useEffect(() => { runAnalysis(false) }, [runAnalysis])
 
@@ -1551,7 +1553,29 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 16 }}>
                     <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px' }}
-                      onClick={() => { if (run.upload_ids?.length) { setUploadIds(run.upload_ids); setUploadDays(run.date_range_days); setUploadBrand(run.brand ?? ''); setUploadIsBulk(run.is_bulk_run ?? false); setUploadPortfolios([]); setSelectedPortfolios([]); setView('analysis') } }}>
+                      onClick={async () => {
+                        if (!run.upload_ids?.length) return
+                        setUploadIds(run.upload_ids)
+                        setUploadDays(run.date_range_days)
+                        setUploadBrand(run.brand ?? '')
+                        setUploadIsBulk(run.is_bulk_run ?? false)
+                        setUploadPortfolios([])
+                        if (run.is_bulk_run) {
+                          // Bulk: fetch portfolio summary then go to selector
+                          const sb = createClient()
+                          const { data } = await sb.from('ppc_uploads')
+                            .select('portfolio_summary')
+                            .eq('id', run.upload_ids[0])
+                            .single()
+                          setUploadPortfolioSummary(data?.portfolio_summary ?? [])
+                          setSelectedPortfolios([])
+                          setView('portfolio_select')
+                        } else {
+                          // Individual: use the run's portfolio name directly
+                          setSelectedPortfolios(run.portfolio ? [run.portfolio] : [''])
+                          setView('analysis')
+                        }
+                      }}>
                       ⚙️ Re-open analysis
                     </button>
                     <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px' }}
