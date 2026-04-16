@@ -848,16 +848,6 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     return results ?? {}
   }
 
-  // Pre-compute campaign table rows (before return to avoid IIFE in JSX)
-  const campMap: Record<string, { spend: number; wasted: number; high: number }> = {}
-  for (const c of (summary.campaigns ?? [])) campMap[c] = { spend: 0, wasted: 0, high: 0 }
-  for (const row of (portData.phrase_high ?? [])) {
-    for (const c of (row.camp_breakdown ?? [])) {
-      if (campMap[c.name]) { campMap[c.name].spend += c.spend ?? 0; campMap[c.name].wasted += (c.roas < 1.0 ? c.spend : 0) ?? 0; campMap[c.name].high++ }
-    }
-  }
-  const campTableRows = Object.entries(campMap).sort((a, b) => b[1].wasted - a[1].wasted).filter(([, v]) => v.spend > 0)
-
   const loadPortfolio = async (portfolioName: string, forceRefresh = false) => {
     if (activePortfolio === portfolioName && !forceRefresh) return
 
@@ -923,6 +913,16 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
 
   const portData   = getActivePortfolioData()
   const summary    = portData.summary ?? {}
+
+  // Pre-compute campaign table rows — must be after summary/portData declarations
+  const campMap: Record<string, { spend: number; wasted: number; high: number }> = {}
+  for (const c of (summary.campaigns ?? [])) campMap[c] = { spend: 0, wasted: 0, high: 0 }
+  for (const row of (portData.phrase_high ?? [])) {
+    for (const c of (row.camp_breakdown ?? [])) {
+      if (campMap[c.name]) { campMap[c.name].spend += c.spend ?? 0; campMap[c.name].wasted += (c.roas < 1.0 ? c.spend : 0) ?? 0; campMap[c.name].high++ }
+    }
+  }
+  const campTableRows = Object.entries(campMap).sort((a, b) => b[1].wasted - a[1].wasted).filter(([, v]) => v.spend > 0)
 
   const tabCounts: Record<Tab, number> = {
     kw_neg:     (portData.phrase_high?.length ?? 0) + (portData.phrase_medium?.length ?? 0) + (portData.exact_negatives?.length ?? 0),
