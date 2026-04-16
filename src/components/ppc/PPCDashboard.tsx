@@ -585,11 +585,8 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
           const { data } = await supabase.from('ppc_decisions_log').select('term,match_type,status,campaign_names,roas_at_decision,wasted_at_decision').eq('analysis_run_id', prior.id).in('status', ['actioned','not_actioning','reversed']).limit(20)
           setPrevDecs(data ?? [])
         }
-      } catch (err: any) { clearInterval(ticker); setLoadError(err.message) }
-      finally { setLoading(false) }
-    }
-  }
-
+    } catch (err: any) { clearInterval(ticker); setLoadError(err.message) }
+    finally { setLoading(false) }
   }, [uploadIds, dateRangeDays, orgId, brand, isBulk])  // useCallback deps
 
   useEffect(() => { runAnalysis(false) }, [runAnalysis])
