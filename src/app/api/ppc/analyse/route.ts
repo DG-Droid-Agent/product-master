@@ -286,22 +286,21 @@ export async function POST(request: NextRequest) {
       .in('id', upload_ids)
 
     // [A3] Check if this portfolio already has a saved run — reuse it
-    const { data: existingRun } = await supabase
+    // Use .contains() for array column — .in() does not work on array columns
+    const { data: runMatches } = await supabase
       .from('ppc_analysis_runs')
-      .select('id, results_json, analysed_at')
+      .select('id, results_json, analysed_at, upload_ids')
       .eq('org_id', org_id)
       .eq('portfolio', portfolio)
-      .in('upload_ids', [upload_ids]) // approximate — exact match below
+      .eq('is_bulk_run', true)
       .order('run_at', { ascending: false })
-      .limit(10)
-      .then(async ({ data }) => {
-        // Exact upload_ids match
-        const exact = (data ?? []).find((r: any) => {
-          const sorted = [...(r.upload_ids ?? [])].sort().join(',')
-          return sorted === [...upload_ids].sort().join(',')
-        })
-        return { data: exact ?? null }
-      })
+      .limit(20)
+
+    // Exact upload_ids match in JS
+    const sortedInput = [...upload_ids].sort().join(',')
+    const existingRun = (runMatches ?? []).find((r: any) =>
+      [...(r.upload_ids ?? [])].sort().join(',') === sortedInput
+    ) ?? null
 
     // Return cached results if available and not forcing refresh
     if (!force && existingRun?.results_json) {

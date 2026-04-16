@@ -661,9 +661,9 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const [results, setResults]         = useState<any>(null)
   const [runId, setRunId]             = useState<string | null>(null)
   const [loadError, setLoadError]     = useState('')
-  const portfolio = selectedPortfoliosIn[0] ?? ''
+  const [currentPortfolioQueue, setCurrentPortfolioQueue] = useState<string[]>(selectedPortfoliosIn)
+  const portfolio = currentPortfolioQueue[0] ?? ''
   const [activePortfolio, setActivePortfolio] = useState<string>(portfolio)
-  const [pendingPortfolios, setPendingPortfolios] = useState<string[]>(selectedPortfoliosIn.slice(1))
   const [allPortfolioRuns, setAllPortfolioRuns] = useState<any[]>([])
   const portfolioCache = useRef<Map<string, any>>(new Map())
   const [activeTab, setActiveTab]     = useState<Tab>('kw_neg')
@@ -679,7 +679,6 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const runAnalysis = useCallback(async (force = false) => {
     // Guard: if no portfolio selected, redirect to selector
     if (isBulk && !portfolio) { onSelectMore(); return }
-    // portfolio is derived from selectedPortfoliosIn[0] above
     setLoading(true); setLoadError(''); setProgress(0)
 
     // Simulate progress steps while waiting for the API
@@ -734,12 +733,15 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
         if (runsJson.portfolio_runs) setAllPortfolioRuns(runsJson.portfolio_runs)
       }
 
-      // If more portfolios were selected, automatically load the next one
-      if (pendingPortfolios.length > 0) {
-        const next = pendingPortfolios[0]
-        setPendingPortfolios(p => p.slice(1))
-        setTimeout(() => loadPortfolio(next), 500)
-      }
+      // If more portfolios in queue, shift queue and load next automatically
+      setCurrentPortfolioQueue(q => {
+        const remaining = q.slice(1)
+        if (remaining.length > 0) {
+          setTimeout(() => loadPortfolio(remaining[0]), 300)
+          return remaining
+        }
+        return []
+      })
 
         // [A4] Pre-populate decision map from existing decisions
         if (json.existing_decisions?.length) {
