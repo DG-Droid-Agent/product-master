@@ -669,9 +669,8 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const [results, setResults]         = useState<any>(null)
   const [runId, setRunId]             = useState<string | null>(null)
   const [loadError, setLoadError]     = useState('')
-  const [currentPortfolioQueue, setCurrentPortfolioQueue] = useState<string[]>(selectedPortfoliosIn)
-  const portfolio = currentPortfolioQueue[0] ?? ''
-  const [activePortfolio, setActivePortfolio] = useState<string>(portfolio)
+  const initialPortfolio = selectedPortfoliosIn[0] ?? ''
+  const [activePortfolio, setActivePortfolio] = useState<string>(initialPortfolio)
   const [allPortfolioRuns, setAllPortfolioRuns] = useState<any[]>([])
   const portfolioCache = useRef<Map<string, any>>(new Map())
   const [activeTab, setActiveTab]     = useState<Tab>('kw_neg')
@@ -684,20 +683,38 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const [prevDecs, setPrevDecs]       = useState<any[]>([])
   const [histExp, setHistExp]         = useState(false)
 
+  const applyDecisions = (decisions: any[]) => {
+    if (!decisions?.length) return
+    const preMap = new Map<string, any>()
+    for (const d of decisions) {
+      let key = ''
+      if (d.match_type === 'negative_phrase')     key = 'neg_phrase_' + d.term
+      else if (d.match_type === 'negative_exact') key = 'neg_exact_' + d.term
+      else if (d.match_type === 'negative_pt')    key = 'neg_pt_' + d.term
+      else if (d.match_type === 'harvest_pt')     key = 'harvest_pt_' + d.term
+      else if (d.match_type.startsWith('harvest_')) {
+        const mtPart = d.match_type.replace('harvest_', '')
+        key = 'harvest_' + mtPart.charAt(0).toUpperCase() + mtPart.slice(1) + '_' + d.term
+      }
+      if (key) preMap.set(key, { status: d.status, campaigns: d.campaign_names ?? [], notes: d.notes ?? '', portfolio: d.portfolio })
+    }
+    setDecisionMap(preMap)
+    setSelected(new Set(preMap.keys()))
+  }
+
   const runAnalysis = useCallback(async (force = false) => {
-    // Guard: if no portfolio selected, redirect to selector
-    if (isBulk && !portfolio) { onSelectMore(); return }
+    // For bulk: need a portfolio to analyse
+    if (isBulk && !initialPortfolio) { onSelectMore(); return }
     setLoading(true); setLoadError(''); setProgress(0)
 
-    // Simulate progress steps while waiting for the API
     const steps = [
       [10, 'Fetching data from database…'],
       [25, 'Loading search term rows…'],
       [45, 'Running n-gram analysis…'],
       [60, 'Analysing PT targets…'],
       [75, 'Scoring harvest candidates…'],
-      [88, 'Building portfolio health…'],
-      [95, 'Finalising results…'],
+      [88, 'Building results…'],
+      [95, 'Finalising…'],
     ]
     let stepIdx = 0
     const ticker = setInterval(() => {
@@ -706,21 +723,21 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
         setProgress(pct as number)
         setProgressMsg(msg as string)
       }
-    }, isBulk ? 3000 : 1000)  // bulk takes longer
+    }, 1200)
 
     try {
-      const [res, prevRes] = await Promise.all([
-        fetch('/api/ppc/analyse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force, portfolio }) }),
-        brand ? supabase.from('ppc_analysis_runs').select('id,run_name,run_at,total_spend,total_wasted,high_negatives,harvest_candidates,date_range_days').eq('org_id', orgId).eq('brand', brand).order('run_at', { ascending: false }).limit(3) : Promise.resolve({ data: [] }),
-      ])
+      const res = await fetch('/api/ppc/analyse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force, portfolio: initialPortfolio || undefined }),
+      })
       clearInterval(ticker)
       setProgress(98); setProgressMsg('Processing results…')
 
-      // Handle non-JSON responses (Vercel timeout returns HTML)
       const text = await res.text()
       let json: any
       try { json = JSON.parse(text) }
-      catch { throw new Error(`Server error (${res.status}) — the analysis may have timed out. Try again or contact support.`) }
+      catch { throw new Error('Server error (' + res.status + ') — timed out or unavailable.') }
 
       if (!res.ok) throw new Error(json.error ?? 'Analysis failed')
       setProgress(100); setProgressMsg('Done!')
@@ -728,69 +745,27 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
       setRunId(json.analysis_run_id)
       setFromCache(json.from_cache ?? false)
       setAnalysedAt(json.analysed_at ?? null)
-      setActivePortfolio(json.portfolio ?? portfolio)
-      // Cache this result for instant switching later
-      portfolioCache.current.set(json.portfolio ?? portfolio, {
-        results: json.results, runId: json.analysis_run_id, analysedAt: json.analysed_at
-      })
 
-      // Load all portfolio runs for this upload to build sidebar
+      const activePF = json.portfolio || initialPortfolio || ''
+      setActivePortfolio(activePF)
+
+      // Cache for instant switching
+      if (activePF) {
+        portfolioCache.current.set(activePF, { results: json.results, runId: json.analysis_run_id, analysedAt: json.analysed_at })
+      }
+
+      // Load all portfolio runs for sidebar (bulk only)
       if (isBulk && uploadIds[0]) {
-        const runsRes = await fetch(`/api/ppc/analyse?upload_id=${uploadIds[0]}&org_id=${orgId}`)
+        const runsRes = await fetch('/api/ppc/analyse?upload_id=' + uploadIds[0] + '&org_id=' + orgId)
         const runsJson = await runsRes.json()
         if (runsJson.portfolio_runs) setAllPortfolioRuns(runsJson.portfolio_runs)
       }
 
-      // If more portfolios in queue, shift queue and load next automatically
-      setCurrentPortfolioQueue(q => {
-        const remaining = q.slice(1)
-        if (remaining.length > 0) {
-          setTimeout(() => loadPortfolio(remaining[0]), 300)
-          return remaining
-        }
-        return []
-      })
+      applyDecisions(json.existing_decisions)
 
-        // [A4] Pre-populate decision map from existing decisions
-        if (json.existing_decisions?.length) {
-          const preMap = new Map<string, any>()
-          for (const d of json.existing_decisions) {
-            // [D3] key format
-            let key = ''
-            if (d.match_type === 'negative_phrase')     key = `neg_phrase_${d.term}`
-            else if (d.match_type === 'negative_exact') key = `neg_exact_${d.term}`
-            else if (d.match_type === 'negative_pt')    key = `neg_pt_${d.term}`
-            else if (d.match_type === 'harvest_pt')     key = `harvest_pt_${d.term}`
-            else if (d.match_type.startsWith('harvest_')) {
-              const mtPart = d.match_type.replace('harvest_', '')
-              const mtCap  = mtPart.charAt(0).toUpperCase() + mtPart.slice(1)
-              key = `harvest_${mtCap}_${d.term}`
-            }
-            if (key) preMap.set(key, { status: d.status, campaigns: d.campaign_names ?? [], notes: d.notes ?? '', portfolio: d.portfolio })
-          }
-          setDecisionMap(preMap)
-          setSelected(new Set(preMap.keys()))
-        }
-
-        if (json.is_duplicate_run) {
-          setToast('ℹ️ Same data as a previous run — existing decisions loaded')
-          setTimeout(() => setToast(''), 5000)
-        }
-
-        // Set default portfolio
-        if (json.results?.is_bulk && json.results?.portfolio_health?.length) {
-          setActivePortfolio(json.results.portfolio_health[0].portfolio)
-        }
-
-        const prior = ((prevRes as any).data ?? []).find((r: any) => r.id !== json.analysis_run_id) ?? null
-        if (prior) {
-          setPrevRun(prior)
-          const { data } = await supabase.from('ppc_decisions_log').select('term,match_type,status,campaign_names,roas_at_decision,wasted_at_decision').eq('analysis_run_id', prior.id).in('status', ['actioned','not_actioning','reversed']).limit(20)
-          setPrevDecs(data ?? [])
-        }
     } catch (err: any) { clearInterval(ticker); setLoadError(err.message) }
     finally { setLoading(false) }
-  }, [uploadIds, dateRangeDays, orgId, brand, isBulk, portfolio])  // useCallback deps
+  }, [uploadIds, dateRangeDays, orgId, brand, isBulk, initialPortfolio])
 
   useEffect(() => { runAnalysis(false) }, [runAnalysis])
 
@@ -873,6 +848,38 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     return results ?? {}
   }
 
+  const loadPortfolio = async (portfolioName: string, forceRefresh = false) => {
+    if (activePortfolio === portfolioName && !forceRefresh) return
+
+    // Check local cache first — instant switch
+    if (!forceRefresh && portfolioCache.current.has(portfolioName)) {
+      const cached = portfolioCache.current.get(portfolioName)
+      setResults(cached.results); setRunId(cached.runId)
+      setFromCache(true); setAnalysedAt(cached.analysedAt)
+      setActivePortfolio(portfolioName); setActiveTab('kw_neg')
+      setSelected(new Set()); setDecisionMap(new Map())
+      return
+    }
+
+    setLoading(true); setLoadError('')
+    try {
+      const res  = await fetch('/api/ppc/analyse', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force: forceRefresh, portfolio: portfolioName }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error)
+
+      portfolioCache.current.set(portfolioName, { results: json.results, runId: json.analysis_run_id, analysedAt: json.analysed_at })
+      setResults(json.results); setRunId(json.analysis_run_id)
+      setFromCache(json.from_cache ?? true); setAnalysedAt(json.analysed_at ?? null)
+      setActivePortfolio(portfolioName); setActiveTab('kw_neg')
+      setSelected(new Set()); setDecisionMap(new Map())
+      applyDecisions(json.existing_decisions)
+    } catch (e: any) { setLoadError(e.message) }
+    finally { setLoading(false) }
+  }
+
   if (loading) return (
     <div style={{ padding: 48, maxWidth: 480, margin: '0 auto' }}>
       <div style={{ textAlign: 'center' as const, marginBottom: 24 }}>
@@ -913,55 +920,6 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     harvest_kw: portData.harvest_candidates?.length ?? 0,
     harvest_pt: portData.pt_harvest?.length ?? 0,
     ngrams:     0,
-  }
-
-  const loadPortfolio = async (portfolioName: string, forceRefresh = false) => {
-    if (activePortfolio === portfolioName && !forceRefresh) return
-    
-    // Check local cache first — instant switch, no API call
-    if (!forceRefresh && portfolioCache.current.has(portfolioName)) {
-      const cached = portfolioCache.current.get(portfolioName)
-      setResults(cached.results); setRunId(cached.runId)
-      setFromCache(true); setAnalysedAt(cached.analysedAt)
-      setActivePortfolio(portfolioName); setActiveTab('kw_neg')
-      setSelected(new Set()); setDecisionMap(new Map())
-      return
-    }
-
-    setLoading(true); setLoadError('')
-    try {
-      const res  = await fetch('/api/ppc/analyse', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force: forceRefresh, portfolio: portfolioName }) })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error)
-      
-      // Store in local cache for instant future switching
-      portfolioCache.current.set(portfolioName, {
-        results: json.results, runId: json.analysis_run_id, analysedAt: json.analysed_at
-      })
-
-      setResults(json.results); setRunId(json.analysis_run_id)
-      setFromCache(json.from_cache ?? true); setAnalysedAt(json.analysed_at ?? null)
-      setActivePortfolio(portfolioName); setActiveTab('kw_neg')
-      setSelected(new Set()); setDecisionMap(new Map())
-      if (json.existing_decisions?.length) {
-        const preMap = new Map<string, any>()
-        for (const d of json.existing_decisions) {
-          let key = ''
-          if (d.match_type === 'negative_phrase')     key = `neg_phrase_${d.term}`
-          else if (d.match_type === 'negative_exact') key = `neg_exact_${d.term}`
-          else if (d.match_type === 'negative_pt')    key = `neg_pt_${d.term}`
-          else if (d.match_type === 'harvest_pt')     key = `harvest_pt_${d.term}`
-          else if (d.match_type.startsWith('harvest_')) {
-            const mtPart = d.match_type.replace('harvest_', '')
-            key = `harvest_${mtPart.charAt(0).toUpperCase() + mtPart.slice(1)}_${d.term}`
-          }
-          if (key) preMap.set(key, { status: d.status, campaigns: d.campaign_names ?? [], notes: d.notes ?? '' })
-        }
-        setDecisionMap(preMap); setSelected(new Set(preMap.keys()))
-      }
-    } catch (e: any) { setLoadError(e.message) }
-    finally { setLoading(false) }
   }
 
   return (
