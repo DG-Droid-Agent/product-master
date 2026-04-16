@@ -922,6 +922,35 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     ngrams:     0,
   }
 
+  const exportCSV = () => {
+    const rows: string[][] = [['Type', 'Term/Expression', 'Match Type', 'Priority', 'Wasted $', 'ROAS', 'Appearances', 'Recommended Campaigns']]
+    for (const r of (portData.phrase_high ?? [])) {
+      rows.push(['Negative', r.ngram, 'Phrase', 'HIGH', r.wasted_spend?.toFixed(2), r.roas?.toFixed(2), r.appearances, r.recommended_scope ?? ''])
+    }
+    for (const r of (portData.phrase_medium ?? [])) {
+      rows.push(['Negative', r.ngram, 'Phrase', 'MEDIUM', r.wasted_spend?.toFixed(2), r.roas?.toFixed(2), r.appearances, r.recommended_scope ?? ''])
+    }
+    for (const r of (portData.exact_negatives ?? [])) {
+      rows.push(['Negative', r.search_term, 'Exact', 'HIGH', r.wasted_spend?.toFixed(2), '0', '', r.campaigns ?? ''])
+    }
+    for (const r of (portData.pt_negatives ?? [])) {
+      rows.push(['PT Negative', r.pt_expression, 'Product Target', r.priority, r.wasted_spend?.toFixed(2), r.roas?.toFixed(2), '', r.recommended_scope ?? ''])
+    }
+    for (const r of (portData.harvest_candidates ?? [])) {
+      rows.push(['Harvest', r.search_term, r.match_types, r.confidence, '', r.roas?.toFixed(2), r.purchases, ''])
+    }
+    for (const r of (portData.pt_harvest ?? [])) {
+      rows.push(['PT Harvest', r.pt_expression, 'Product Target', r.confidence, '', r.roas?.toFixed(2), r.orders, ''])
+    }
+    const csv = rows.map(r => r.map(c => '"' + String(c ?? '').replace(/"/g, '""') + '"').join(',')).join('
+')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a'); a.href = url
+    a.download = (activePortfolio || 'ppc-analysis') + '-' + new Date().toISOString().slice(0,10) + '.csv'
+    a.click(); URL.revokeObjectURL(url)
+  }
+
   return (
     <div style={{ display: 'flex', height: '100%', minHeight: 0 }}>
 
@@ -940,12 +969,17 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                 padding: '7px 10px', borderRadius: 6, marginBottom: 2, cursor: 'pointer',
                 background: isActive ? 'var(--accent-light)' : 'transparent',
                 border: isActive ? '1px solid var(--accent)' : '1px solid transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               }}>
-                <span style={{ fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, flex: 1 }}>
-                  {p.portfolio}
-                </span>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: hc.dot, flexShrink: 0, marginLeft: 6 }} title={`${p.high_negatives} HIGH · ${(p.wasted_pct*100).toFixed(0)}% wasted`} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, flex: 1 }}>
+                    {p.portfolio}
+                  </span>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: hc.dot, flexShrink: 0, marginLeft: 6 }} />
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                  {p.high_negatives > 0 && <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600 }}>{p.high_negatives} HIGH</span>}
+                  <span style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>${(p.total_wasted ?? 0).toFixed(0)} wasted</span>
+                </div>
               </div>
             )
           })}
@@ -993,8 +1027,9 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                 🔄 Refresh analysis
               </button>
             )}
+            <button className="btn-secondary" style={{ fontSize: 12 }} onClick={exportCSV}>⬇ Export CSV</button>
             <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => runId && onGoDecisions(runId)}>View decisions log</button>
-            <button className="btn-secondary" style={{ fontSize: 12 }} onClick={onBack}>＋ New upload</button>
+            <button className="btn-secondary" style={{ fontSize: 12 }} onClick={onBack}>← Back to uploads</button>
 
           </div>
         </div>
@@ -1552,6 +1587,16 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                 const totalPorts = upload.portfolios?.length ?? 0
                 const isBulk     = upload.is_bulk_file
 
+                const firstRun    = uploadRuns[0]
+                const fmtDate     = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                const dateLabel   = firstRun?.report_start_date && firstRun?.report_end_date
+                  ? 'Data: ' + fmtDate(firstRun.report_start_date) + ' – ' + fmtDate(firstRun.report_end_date)
+                  : 'Uploaded ' + fmtDate(upload.uploaded_at)
+                const totalWasted  = uploadRuns.reduce((s: number, r: any) => s + (r.total_wasted ?? 0), 0)
+                const totalSpend   = uploadRuns.reduce((s: number, r: any) => s + (r.total_spend ?? 0), 0)
+                const totalHigh    = uploadRuns.reduce((s: number, r: any) => s + (r.high_negatives ?? 0), 0)
+                const totalHarvest = uploadRuns.reduce((s: number, r: any) => s + (r.harvest_candidates ?? 0), 0)
+
                 return (
                   <div key={upload.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
 
@@ -1568,9 +1613,9 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                               : <span style={{ fontSize: 12, fontWeight: 600 }}>{upload.filename?.replace(/\.(csv|xlsx)$/i, '')}</span>
                           }
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', gap: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
                           <span>{(item.group ? item.group.reduce((s: number, u: any) => s + (u.row_count ?? 0), 0) : (upload.row_count ?? 0)).toLocaleString()} rows</span>
-                          <span>Uploaded {new Date(upload.uploaded_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                          <span style={{ fontWeight: 600, color: 'var(--text)' }}>{dateLabel}</span>
                           {isBulk && donePorts.length > 0 && <span style={{ color: '#166534', fontWeight: 600 }}>✓ {donePorts.length}/{totalPorts} portfolios analysed</span>}
                           {isBulk && donePorts.length === 0 && <span>No portfolios analysed yet</span>}
                         </div>
@@ -1603,30 +1648,55 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                       </div>
                     </div>
 
-                    {/* Portfolio pills */}
+                    {/* Portfolio pills + account summary */}
                     {isBulk && donePorts.length > 0 && (
-                      <div style={{ borderTop: '1px solid var(--border)', padding: '8px 18px', display: 'flex', gap: 6, flexWrap: 'wrap' as const, background: 'var(--surface2)' }}>
-                        {donePorts.map(port => {
-                          const run    = uploadRuns.find(r => r.portfolio === port)
-                          const wPct   = (run?.total_spend ?? 0) > 0 ? (run?.total_wasted ?? 0) / run.total_spend : 0
-                          const hi     = run?.high_negatives ?? 0
-                          const health: Health = wPct > 0.30 || hi > 3 ? 'red' : wPct > 0.15 || hi > 0 ? 'amber' : 'green'
-                          return (
-                            <button key={port} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, cursor: 'pointer', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text)' }}
-                              onClick={() => {
-                                setUploadIds([upload.id]); setUploadDays(65); setUploadBrand(upload.brand ?? '')
-                                setUploadIsBulk(true); setUploadPortfolioSummary(upload.portfolio_summary ?? [])
-                                setSelectedPortfolios([port]); setView('analysis')
-                              }}>
-                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: HEALTH_COLORS[health].dot, flexShrink: 0 }} />
-                              {port}
-                            </button>
-                          )
-                        })}
-                        {totalPorts > donePorts.length && (
-                          <span style={{ fontSize: 11, color: 'var(--text3)', alignSelf: 'center' }}>+{totalPorts - donePorts.length} not analysed</span>
-                        )}
-                      </div>
+                        <div style={{ borderTop: '1px solid var(--border)', background: 'var(--surface2)' }}>
+                          {/* Account summary bar */}
+                          <div style={{ padding: '8px 18px', display: 'flex', gap: 20, borderBottom: '1px solid var(--border)' }}>
+                            <div>
+                              <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>Total spend </span>
+                              <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)' }}>${totalSpend.toFixed(0)}</span>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>Wasted </span>
+                              <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)', color: '#dc2626' }}>${totalWasted.toFixed(0)}</span>
+                              <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 4 }}>{totalSpend > 0 ? ((totalWasted / totalSpend) * 100).toFixed(0) : 0}%</span>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>HIGH terms </span>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#dc2626' }}>{totalHigh}</span>
+                            </div>
+                            <div>
+                              <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>Harvest kw </span>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>{totalHarvest}</span>
+                            </div>
+                            <div style={{ flex: 1 }} />
+                            <span style={{ fontSize: 10, color: 'var(--text3)', alignSelf: 'center' }}>across {donePorts.length} analysed portfolios</span>
+                          </div>
+                          {/* Portfolio pills */}
+                          <div style={{ padding: '8px 18px', display: 'flex', gap: 6, flexWrap: 'wrap' as const }}>
+                            {donePorts.map(port => {
+                              const run    = uploadRuns.find((r: any) => r.portfolio === port)
+                              const wPct   = (run?.total_spend ?? 0) > 0 ? (run?.total_wasted ?? 0) / run.total_spend : 0
+                              const hi     = run?.high_negatives ?? 0
+                              const health: Health = wPct > 0.30 || hi > 3 ? 'red' : wPct > 0.15 || hi > 0 ? 'amber' : 'green'
+                              return (
+                                <button key={port} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, cursor: 'pointer', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text)' }}
+                                  onClick={() => {
+                                    setUploadIds([upload.id]); setUploadDays(65); setUploadBrand(upload.brand ?? '')
+                                    setUploadIsBulk(true); setUploadPortfolioSummary(upload.portfolio_summary ?? [])
+                                    setSelectedPortfolios([port]); setView('analysis')
+                                  }}>
+                                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: HEALTH_COLORS[health].dot, flexShrink: 0 }} />
+                                  {port}
+                                </button>
+                              )
+                            })}
+                            {totalPorts > donePorts.length && (
+                              <span style={{ fontSize: 11, color: 'var(--text3)', alignSelf: 'center' }}>+{totalPorts - donePorts.length} not analysed</span>
+                            )}
+                          </div>
+                        </div>
                     )}
                   </div>
                 )
