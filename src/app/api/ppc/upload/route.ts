@@ -48,6 +48,7 @@ function parseBulkFile(buffer: Buffer): { rows: any[]; portfolios: string[] } {
     const campaignName = String(r['Campaign Name (Informational only)'] ?? '').trim()
     const portfolio    = String(r['Portfolio Name (Informational only)'] ?? '').trim() || 'Unassigned'
     const ptId         = r['Product Targeting ID']
+    const keywordId    = r['Keyword ID']
     const ptExpr       = String(r['Product Targeting Expression'] ?? '').trim()
     const keywordText  = String(r['Keyword Text'] ?? '').trim()
     const spend        = parseFloat(r['Spend'])       || 0
@@ -58,7 +59,13 @@ function parseBulkFile(buffer: Buffer): { rows: any[]; portfolios: string[] } {
 
     if (!searchTerm || !campaignName) continue
 
-    const targetingType: 'keyword' | 'pt' = (ptId && String(ptId).trim() !== '') ? 'pt' : 'keyword'
+    // Classification logic:
+    // PT row = has a Product Targeting ID AND no Keyword ID
+    // Keyword row = has a Keyword ID (even if also has PT ID — keyword wins)
+    // Both IDs come through as numbers from XLSX — check for null/undefined/NaN/''/0
+    const ptIdValid = ptId !== null && ptId !== undefined && ptId !== '' && !Number.isNaN(Number(ptId)) && Number(ptId) !== 0
+    const kwIdValid = keywordId !== null && keywordId !== undefined && keywordId !== '' && !Number.isNaN(Number(keywordId)) && Number(keywordId) !== 0
+    const targetingType: 'keyword' | 'pt' = (ptIdValid && !kwIdValid) ? 'pt' : 'keyword'
 
     rows.push({
       search_term:     searchTerm,
