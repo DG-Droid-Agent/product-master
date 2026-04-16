@@ -1435,7 +1435,15 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
       orgId={orgId!}
     />
   )
-  if (view === 'analysis')  return <AnalysisView uploadIds={uploadIds} dateRangeDays={uploadDays} brand={uploadBrand} orgId={orgId!} isBulk={uploadIsBulk} portfolios={uploadPortfolios} selectedPortfolios={selectedPortfolios} onBack={() => setView('home')} onSelectMore={() => setView('portfolio_select')} onGoDecisions={handleGoDecisions} />
+  if (view === 'analysis')  return <AnalysisView uploadIds={uploadIds} dateRangeDays={uploadDays} brand={uploadBrand} orgId={orgId!} isBulk={uploadIsBulk} portfolios={uploadPortfolios} selectedPortfolios={selectedPortfolios} onBack={() => setView('home')} onSelectMore={async () => {
+    // Re-fetch portfolio summary if empty (e.g. came via duplicate upload button)
+    if (uploadPortfolioSummary.length === 0 && uploadIds.length > 0) {
+      const sb = createClient()
+      const { data } = await sb.from('ppc_uploads').select('portfolio_summary').eq('id', uploadIds[0]).single()
+      if (data?.portfolio_summary?.length) setUploadPortfolioSummary(data.portfolio_summary)
+    }
+    setView('portfolio_select')
+  }} onGoDecisions={handleGoDecisions} />
   if (view === 'decisions') return <DecisionsView orgId={orgId!} brands={brands} initialRunId={decisionsRunId} onBack={() => setView('home')} />
 
   // ── HOME ──────────────────────────────────────────────────────────────────
