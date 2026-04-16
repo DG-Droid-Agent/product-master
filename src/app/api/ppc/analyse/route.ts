@@ -456,6 +456,20 @@ export async function POST(request: NextRequest) {
     const dateLabel    = startDate && endDate && startDate !== endDate ? `${fmt(startDate)} – ${fmt(endDate)}` : startDate ? fmt(startDate)! : null
     const autoRunName  = [brand, asins.length ? asins.join(', ') : null, dateLabel, isBulk ? 'Full account bulk' : null].filter(Boolean).join(' · ')
 
+    // [A3] Duplicate run detection — must come before saved results check
+    const sortedIds = [...upload_ids].sort()
+    const { data: existingRuns } = await supabase
+      .from('ppc_analysis_runs').select('id, upload_ids, run_at, is_bulk_run')
+      .eq('org_id', org_id).order('run_at', { ascending: false }).limit(20)
+
+    const duplicate = existingRuns?.find((r: any) => {
+      const sorted = [...(r.upload_ids ?? [])].sort()
+      const idsMatch = sorted.length === sortedIds.length && sorted.every((id: string, i: number) => id === sortedIds[i])
+      // Only reuse a run if the bulk flag matches — don't reuse pre-portfolio runs
+      const bulkMatches = (r.is_bulk_run ?? false) === isBulk
+      return idsMatch && bulkMatches
+    })
+
     // ── CHECK FOR SAVED RESULTS ──────────────────────────────────────────────
     // If this run already has results saved and force=true is not set, return them instantly
     if (!force && duplicate?.id) {
@@ -484,20 +498,6 @@ export async function POST(request: NextRequest) {
     }
 
     const results = await runAnalysis(termRows as SearchTermRow[], date_range_days, existingKeywords, isBulk)
-
-    // [A3] Duplicate run detection
-    const sortedIds = [...upload_ids].sort()
-    const { data: existingRuns } = await supabase
-      .from('ppc_analysis_runs').select('id, upload_ids, run_at, is_bulk_run')
-      .eq('org_id', org_id).order('run_at', { ascending: false }).limit(20)
-
-    const duplicate = existingRuns?.find((r: any) => {
-      const sorted = [...(r.upload_ids ?? [])].sort()
-      const idsMatch = sorted.length === sortedIds.length && sorted.every((id: string, i: number) => id === sortedIds[i])
-      // Only reuse a run if the bulk flag matches — don't reuse pre-portfolio runs
-      const bulkMatches = (r.is_bulk_run ?? false) === isBulk
-      return idsMatch && bulkMatches
-    })
 
     let runData: any
     if (duplicate) {
