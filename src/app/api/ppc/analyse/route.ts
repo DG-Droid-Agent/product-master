@@ -1,13 +1,13 @@
 // app/api/ppc/analyse/route.ts
+// Clean model: 1 run per portfolio per bulk upload
 // [A1] runAnalysis NOT exported
-// [A2] cs >= 10 spend threshold for recommendations
-// [A3] Duplicate run detection
+// [A2] cs >= 10 spend threshold
+// [A3] 1 run per portfolio — reuse if exists
 // [A4] Decision carry-forward
-// [A5] autoRunName from brand+ASIN+dates
-// [A6] asin/report dates stored on run
+// [A5] autoRunName
+// [A6] dates stored on run
 // [A7] Toxic combo $10+ threshold
 // [A8] Per-campaign attribution
-// NEW: per-portfolio analysis, PT negative detection, PT harvest detection
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
@@ -24,7 +24,7 @@ interface SearchTermRow {
   matched_keyword?: string
 }
 
-// ── N-GRAM HELPERS ────────────────────────────────────────────────────────────
+// ── N-GRAM HELPERS ─────────────────────────────────────────────────────────────
 
 function getNgrams(text: string, n: number): string[] {
   const words = text.toLowerCase().match(/[a-z0-9]+/g)?.filter(w => w.length > 1 || /[a-z]/.test(w)) ?? []
@@ -56,7 +56,6 @@ function findCoreTerms(uni: any[]): Set<string> {
   return new Set([...uni].sort((a, b) => b.total_cost - a.total_cost).slice(0, 15).filter(u => u.roas >= 2.0).map(u => u.ngram))
 }
 
-// [A2] threshold: spend >= 10 AND ROAS < 1.0
 function classifyPriority(row: any, ngramSize: number): 'HIGH' | 'MEDIUM' | 'WATCH' | null {
   const { appearances, wasted_spend: wasted, roas, acos } = row
   const significant = ngramSize === 1 ? (appearances >= 10 || wasted >= 25) : (appearances >= 20 || wasted >= 30)
@@ -75,90 +74,61 @@ function genericFlag(term: string): string {
   return ''
 }
 
-// ── PT ANALYSIS ───────────────────────────────────────────────────────────────
-// Runs on PT rows — finds negative PT targets and harvest PT targets
+// ── PT ANALYSIS ────────────────────────────────────────────────────────────────
 
 function analysePT(ptRows: SearchTermRow[], campaigns: string[]) {
   if (!ptRows.length) return { pt_negatives: [], pt_harvest: [] }
-
-  // Group by pt_expression across all campaigns in this portfolio
   const exprMap = new Map<string, { cost: number; sales: number; orders: number; campaigns: string[] }>()
-
   for (const row of ptRows) {
     const expr = row.pt_expression || 'unknown'
     const b    = exprMap.get(expr) ?? { cost: 0, sales: 0, orders: 0, campaigns: [] }
-    b.cost   += row.cost
-    b.sales  += row.sales
-    b.orders += row.purchases
+    b.cost += row.cost; b.sales += row.sales; b.orders += row.purchases
     if (!b.campaigns.includes(row.campaign_name)) b.campaigns.push(row.campaign_name)
     exprMap.set(expr, b)
   }
-
   const ptNegatives: any[] = []
   const ptHarvest:   any[] = []
-
   for (const [expr, b] of exprMap) {
     if (expr === 'unknown') continue
     const roas = b.cost > 0 ? b.sales / b.cost : 0
-
-    // [A2] pattern: $10+ spend threshold for recommendations
     if (roas < 1.0 && b.cost >= 10) {
-      // Per-campaign breakdown for this expression
       const campBreakdown = campaigns.map(c => {
         const cr = ptRows.filter(r => r.campaign_name === c && (r.pt_expression || '') === expr)
         const cs = cr.reduce((s, r) => s + r.cost, 0)
         const ss = cr.reduce((s, r) => s + r.sales, 0)
         return cs > 0 ? { name: c, spend: cs, roas: cs > 0 ? ss / cs : 0 } : null
       }).filter(Boolean) as { name: string; spend: number; roas: number }[]
-
       const recCamps = campBreakdown.filter(c => c.roas < 1.0 && c.spend >= 10).map(c => c.name)
-
       ptNegatives.push({
-        pt_expression:     expr,
-        wasted_spend:      b.cost - b.sales > 0 ? b.cost - b.sales : b.cost,
-        total_spend:       b.cost,
-        total_sales:       b.sales,
-        roas,
-        acos:              b.sales > 0 ? b.cost / b.sales * 100 : 100,
-        priority:          roas === 0 ? 'HIGH' : 'MEDIUM',
-        campaigns:         b.campaigns,
-        camp_breakdown:    campBreakdown,
+        pt_expression: expr, wasted_spend: b.cost - b.sales > 0 ? b.cost - b.sales : b.cost,
+        total_spend: b.cost, total_sales: b.sales, roas,
+        acos: b.sales > 0 ? b.cost / b.sales * 100 : 100,
+        priority: roas === 0 ? 'HIGH' : 'MEDIUM',
+        campaigns: b.campaigns, camp_breakdown: campBreakdown,
         recommended_scope: recCamps.join(', ') || b.campaigns.join(', '),
-        action:            expr.startsWith('asin=')
-          ? `Exclude ASIN ${expr.replace(/asin="|"/g, '')} from product targeting`
-          : `Add "${expr}" as negative product target`,
+        action: expr.startsWith('asin=') ? `Exclude ASIN ${expr.replace(/asin="|"/g, '')} from product targeting` : `Add "${expr}" as negative product target`,
       })
     }
-
     if (roas >= 3.0 && b.cost >= 20 && b.orders >= 3) {
       ptHarvest.push({
-        pt_expression: expr,
-        total_spend:   b.cost,
-        total_sales:   b.sales,
-        orders:        b.orders,
-        roas,
-        acos:          b.sales > 0 ? b.cost / b.sales * 100 : 0,
-        conviction:    roas * b.cost,
-        confidence:    b.orders >= 10 && roas >= 5 ? '⭐⭐⭐ HIGH' : b.orders >= 5 && roas >= 3 ? '⭐⭐ MEDIUM' : '⭐ EMERGING',
-        campaigns:     b.campaigns,
-        action:        expr.startsWith('asin=')
-          ? `Add ${expr.replace(/asin="|"/g, '')} as explicit PT target — already converting at ${roas.toFixed(2)}x`
-          : `Expand "${expr}" targeting — strong performer`,
+        pt_expression: expr, total_spend: b.cost, total_sales: b.sales, orders: b.orders, roas,
+        acos: b.sales > 0 ? b.cost / b.sales * 100 : 0, conviction: roas * b.cost,
+        confidence: b.orders >= 10 && roas >= 5 ? '⭐⭐⭐ HIGH' : b.orders >= 5 && roas >= 3 ? '⭐⭐ MEDIUM' : '⭐ EMERGING',
+        campaigns: b.campaigns,
+        action: expr.startsWith('asin=') ? `Add ${expr.replace(/asin="|"/g, '')} as explicit PT target — already converting at ${roas.toFixed(2)}x` : `Expand "${expr}" targeting — strong performer`,
       })
     }
   }
-
   return {
     pt_negatives: ptNegatives.sort((a, b) => b.total_spend - a.total_spend),
     pt_harvest:   ptHarvest.sort((a, b) => b.conviction - a.conviction),
   }
 }
 
-// ── KEYWORD ANALYSIS (unchanged from v1 with all bug fixes) ───────────────────
+// ── KEYWORD ANALYSIS ──────────────────────────────────────────────────────────
 
 function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[]) {
   const campaigns = [...new Set(rows.map(r => r.campaign_name))]
-
   const aggMap = new Map<string, SearchTermRow>()
   for (const row of rows) {
     const ex = aggMap.get(row.search_term)
@@ -166,38 +136,31 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
     else aggMap.set(row.search_term, { ...row })
   }
   const agg = Array.from(aggMap.values())
-
   const uni  = buildNgramTable(agg, 1)
   const bi   = buildNgramTable(agg, 2)
   const tri  = buildNgramTable(agg, 3)
   const core = findCoreTerms(uni)
   const existingKwSet = new Set(existingKeywords.map(k => k.toLowerCase().trim()).filter(k => k !== 'close-match'))
-
   const phraseCandidates: any[] = []
 
   const processNgram = (row: any, ngramSize: number) => {
     if (row.ngram.split(' ').every((w: string) => core.has(w))) return
     const pri = classifyPriority(row, ngramSize)
     if (!pri) return
-
-    // [A2] $10+ spend per campaign
     const recCamps = campaigns.filter(c => {
       const cr = rows.filter(r => r.campaign_name === c && r.search_term.toLowerCase().includes(row.ngram))
       const cs = cr.reduce((s, r) => s + r.cost, 0)
       const ss = cr.reduce((s, r) => s + r.sales, 0)
       return cs >= 10 && ss / cs < 1.0
     })
-
     const autoRows  = rows.filter(r => r.campaign_name.toLowerCase().includes('auto')  && r.search_term.toLowerCase().includes(row.ngram))
     const broadRows = rows.filter(r => r.campaign_name.toLowerCase().includes('broad') && r.search_term.toLowerCase().includes(row.ngram))
     const autoSpend  = autoRows.reduce((s, r) => s + r.cost, 0)
     const broadSpend = broadRows.reduce((s, r) => s + r.cost, 0)
-
     phraseCandidates.push({
-      ...row, priority: pri,
-      ngram_type: ngramSize === 1 ? 'Unigram' : `${ngramSize}-gram`,
+      ...row, priority: pri, ngram_type: ngramSize === 1 ? 'Unigram' : `${ngramSize}-gram`,
       campaigns: [autoSpend > 0 && 'auto', broadSpend > 0 && 'broad'].filter(Boolean).join(', '),
-      auto_spend: autoSpend, broad_spend: broadSpend,   // [A8]
+      auto_spend: autoSpend, broad_spend: broadSpend,
       auto_roas:  autoSpend  > 0 ? autoRows.reduce((s, r) => s + r.sales, 0)  / autoSpend  : 0,
       broad_roas: broadSpend > 0 ? broadRows.reduce((s, r) => s + r.sales, 0) / broadSpend : 0,
       recommended_scope: recCamps.length > 0 ? recCamps.join(', ') : campaigns.join(', '),
@@ -223,8 +186,7 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
       return { search_term: row.search_term, cost: row.cost, wasted_spend: row.cost, roas: 0, acos: 100, coverage: highMed.length > 0 ? 'Covered' : matches.length > 0 ? 'Partial' : 'Not covered', covered_by: (highMed.length > 0 ? highMed : matches).join(', '), campaigns: camps.join(', ') }
     })
 
-  // [A7] Toxic combos — $10+ spend threshold
-  const goodWords = new Set(uni.filter(u => u.roas >= 2.0).map(u => u.ngram))
+  const goodWords  = new Set(uni.filter(u => u.roas >= 2.0).map(u => u.ngram))
   const toxicCombos = [...bi, ...tri]
     .filter(row => row.roas < 1.0 && row.ngram.split(' ').every((w: string) => goodWords.has(w)))
     .map(row => {
@@ -235,7 +197,7 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
         const ss = cr.reduce((s, r) => s + r.sales, 0)
         return cs > 0 ? { name: c, spend: cs, roas: cs > 0 ? ss / cs : 0 } : null
       }).filter(Boolean) as { name: string; spend: number; roas: number }[]
-      const recCamps = campBreakdown.filter(c => c.roas < 1.0 && c.spend >= 10).map(c => c.name) // [A7]
+      const recCamps = campBreakdown.filter(c => c.roas < 1.0 && c.spend >= 10).map(c => c.name)
       return { ...row, combo_type: row.ngram.split(' ').length === 2 ? 'bigram' : 'trigram', reason: `Each word ROAS≥2.0 but combined ROAS=${row.roas.toFixed(2)}`, priority: 'HIGH', recommended_scope: recCamps.join(', ') || campaigns.join(', '), camp_breakdown: campBreakdown }
     })
     .sort((a: any, b: any) => b.wasted_spend - a.wasted_spend)
@@ -258,15 +220,13 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
         const cp = cr.reduce((s, r) => s + r.purchases, 0)
         return cs > 0 ? `${c}: ${cp} orders @ ROAS ${(ss/cs).toFixed(1)}x` : null
       }).filter(Boolean).join(' | ')
-
       return {
         search_term: row.search_term, purchases: p, cost: row.cost, sales: row.sales, roas,
         acos: row.cost / row.sales, conviction: roas * row.cost,
         confidence: p >= 10 && roas >= 5 ? '⭐⭐⭐ HIGH' : p >= 5 && roas >= 3 ? '⭐⭐ MEDIUM' : '⭐ EMERGING',
         match_types: matchTypes.join(', '),
         existing_targeting: isExact ? '⚠️ Already targeted' : partial.length > 0 ? `⚡ Partially covered: ${partial.join(', ')}` : '🆕 New — not targeted',
-        campaign_breakdown: campBreakdown,
-        avg_order_value: avgOV,
+        campaign_breakdown: campBreakdown, avg_order_value: avgOV,
         suggested_bid: Math.min(3.00, Math.max(0.20, +(avgOV * TARGET_ACOS).toFixed(2))),
         generic_flag: genericFlag(row.search_term),
       }
@@ -295,87 +255,163 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
   }
 }
 
-// ── MAIN: run per portfolio ───────────────────────────────────────────────────
+// ── SINGLE PORTFOLIO ANALYSIS ─────────────────────────────────────────────────
 // [A1] NOT exported
-async function runAnalysis(allRows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[], isBulk: boolean) {
-  if (!isBulk) {
-    // Individual file — use ALL rows for keyword n-gram analysis
-    // PT rows have valid customer search terms (what the shopper typed)
-    const ptRows   = allRows.filter(r => r.targeting_type === 'pt')
-    const campaigns = [...new Set(allRows.map(r => r.campaign_name))]
-    const kwResult  = analyseKeywords(allRows, dateRangeDays, existingKeywords)
-    const ptResult  = ptRows.length ? analysePT(ptRows, campaigns) : { pt_negatives: [], pt_harvest: [] }
-    return {
-      is_bulk: false,
-      portfolios: null,
-      account: { ...kwResult, ...ptResult },
+
+async function runPortfolioAnalysis(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[]) {
+  const kwRows = rows.filter(r => r.targeting_type !== 'pt')
+  const ptRows = rows.filter(r => r.targeting_type === 'pt')
+  const campaigns = [...new Set(rows.map(r => r.campaign_name))]
+  const kwResult  = analyseKeywords(kwRows.length ? kwRows : rows, dateRangeDays, existingKeywords)
+  const ptResult  = ptRows.length ? analysePT(ptRows, campaigns) : { pt_negatives: [], pt_harvest: [] }
+  return { ...kwResult, ...ptResult }
+}
+
+// ── API ROUTE ─────────────────────────────────────────────────────────────────
+
+export async function POST(request: NextRequest) {
+  try {
+    const supabase = createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { upload_ids, date_range_days, org_id, brand, portfolio, force } = await request.json()
+    if (!upload_ids?.length || !date_range_days || !org_id || !portfolio) {
+      return NextResponse.json({ error: 'Missing: upload_ids, date_range_days, org_id, portfolio' }, { status: 400 })
     }
-  }
 
-  // Bulk file — run per portfolio + account totals
-  const portfolioNames = [...new Set(allRows.map(r => r.portfolio).filter(Boolean))] as string[]
+    // Fetch upload metadata
+    const { data: uploadMeta } = await supabase.from('ppc_uploads')
+      .select('asin, report_start_date, report_end_date, campaign_name, is_bulk_file')
+      .in('id', upload_ids)
 
-  // Portfolio-level results
-  const portfolioResults: Record<string, any> = {}
+    // [A3] Check if this portfolio already has a saved run — reuse it
+    const { data: existingRun } = await supabase
+      .from('ppc_analysis_runs')
+      .select('id, results_json, analysed_at')
+      .eq('org_id', org_id)
+      .eq('portfolio', portfolio)
+      .in('upload_ids', [upload_ids]) // approximate — exact match below
+      .order('run_at', { ascending: false })
+      .limit(10)
+      .then(async ({ data }) => {
+        // Exact upload_ids match
+        const exact = (data ?? []).find((r: any) => {
+          const sorted = [...(r.upload_ids ?? [])].sort().join(',')
+          return sorted === [...upload_ids].sort().join(',')
+        })
+        return { data: exact ?? null }
+      })
 
-  for (const portfolio of portfolioNames) {
-    const portRows  = allRows.filter(r => r.portfolio === portfolio)
-    const ptRows    = portRows.filter(r => r.targeting_type === 'pt')
-    const campaigns = [...new Set(portRows.map(r => r.campaign_name))]
+    // Return cached results if available and not forcing refresh
+    if (!force && existingRun?.results_json) {
+      const { data: existingDecisions } = await supabase
+        .from('ppc_decisions_log')
+        .select('term, match_type, status, campaign_names, notes, is_generic_flag, decided_at, portfolio')
+        .eq('analysis_run_id', existingRun.id)
+        .order('decided_at', { ascending: false })
+      return NextResponse.json({
+        analysis_run_id:    existingRun.id,
+        portfolio,
+        from_cache:         true,
+        analysed_at:        existingRun.analysed_at,
+        existing_decisions: existingDecisions ?? [],
+        results:            existingRun.results_json,
+      })
+    }
 
-    // Use ALL rows for keyword n-gram analysis — customer search terms are valid
-    // regardless of whether the impression came from a keyword or PT targeting
-    const kwResult = analyseKeywords(portRows, dateRangeDays, existingKeywords)
-    const ptResult = ptRows.length ? analysePT(ptRows, campaigns) : { pt_negatives: [], pt_harvest: [] }
+    // Fetch rows for this portfolio only — indexed query, fast
+    const allRows: any[] = []
+    const PAGE = 1000
+    let offset = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('ppc_search_terms')
+        .select('search_term, campaign_name, portfolio, targeting_type, pt_expression, cost, purchases, sales, matched_keyword')
+        .in('upload_id', upload_ids)
+        .eq('org_id', org_id)
+        .eq('portfolio', portfolio)
+        .range(offset, offset + PAGE - 1)
+      if (error) throw error
+      if (data?.length) allRows.push(...data)
+      if (!data?.length || data.length < PAGE) break
+      offset += PAGE
+    }
 
-    portfolioResults[portfolio] = {
+    if (!allRows.length) return NextResponse.json({ error: `No data found for portfolio: ${portfolio}` }, { status: 404 })
+
+    const existingKeywords = [...new Set(allRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
+    const results = await runPortfolioAnalysis(allRows as SearchTermRow[], date_range_days, existingKeywords)
+
+    // [A5] Build run name
+    const dates     = (uploadMeta ?? []).flatMap((u: any) => [u.report_start_date, u.report_end_date].filter(Boolean))
+    const startDate = dates.length ? dates.reduce((a: string, b: string) => a < b ? a : b) : null
+    const endDate   = dates.length ? dates.reduce((a: string, b: string) => a > b ? a : b) : null
+    const fmt       = (d: string | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : null
+    const dateLabel = startDate && endDate ? `${fmt(startDate)} – ${fmt(endDate)}` : null
+    const runName   = [brand, portfolio, dateLabel].filter(Boolean).join(' · ')
+
+    // Create or update the run for this portfolio
+    let runId: string
+    if (existingRun?.id) {
+      runId = existingRun.id
+    } else {
+      const { data: inserted, error: runError } = await supabase
+        .from('ppc_analysis_runs').insert({
+          org_id, brand: brand ?? null,
+          report_start_date: startDate ?? null,
+          report_end_date: endDate ?? null,
+          run_name: runName,
+          upload_ids, date_range_days,
+          is_bulk_run: true,
+          portfolio,
+          portfolio_roas:    results.summary.overall_roas,
+          total_spend:       results.summary.total_spend,
+          total_wasted:      results.summary.total_wasted,
+          total_terms:       results.summary.total_terms,
+          high_negatives:    results.phrase_high.length,
+          medium_negatives:  results.phrase_medium.length,
+          harvest_candidates: results.harvest_candidates.length,
+          run_by: user.id,
+        }).select('id').single()
+      if (runError) throw runError
+      runId = inserted.id
+    }
+
+    // Save trimmed results
+    const trimNgrams = (r: any) => r ? { ...r, ngrams: { uni: (r.ngrams?.uni ?? []).slice(0, 20), bi: (r.ngrams?.bi ?? []).slice(0, 20), tri: (r.ngrams?.tri ?? []).slice(0, 15) } } : r
+    await supabase.from('ppc_analysis_runs')
+      .update({ results_json: trimNgrams(results), analysed_at: new Date().toISOString(),
+        portfolio_roas: results.summary.overall_roas, total_spend: results.summary.total_spend,
+        total_wasted: results.summary.total_wasted, high_negatives: results.phrase_high.length,
+        harvest_candidates: results.harvest_candidates.length })
+      .eq('id', runId)
+
+    // [A4] Carry forward decisions
+    const { data: existingDecisions } = await supabase
+      .from('ppc_decisions_log')
+      .select('term, match_type, status, campaign_names, notes, is_generic_flag, decided_at, portfolio')
+      .eq('analysis_run_id', runId)
+      .order('decided_at', { ascending: false })
+
+    return NextResponse.json({
+      analysis_run_id:    runId,
       portfolio,
-      ...kwResult,
-      ...ptResult,
-    }
-  }
+      from_cache:         false,
+      analysed_at:        new Date().toISOString(),
+      existing_decisions: existingDecisions ?? [],
+      results,
+    })
 
-  // Account-level totals — use ALL rows for keyword n-gram analysis
-  const allPtRows    = allRows.filter(r => r.targeting_type === 'pt')
-  const allCampaigns = [...new Set(allRows.map(r => r.campaign_name))]
-  const accountKw    = analyseKeywords(allRows, dateRangeDays, existingKeywords)
-  const accountPt    = analysePT(allPtRows, allCampaigns)
-
-  // Portfolio health summary for sidebar colour coding
-  const portfolioHealth = Object.values(portfolioResults).map((p: any) => ({
-    portfolio:         p.portfolio,
-    total_spend:       p.summary.total_spend,
-    total_wasted:      p.summary.total_wasted,
-    overall_roas:      p.summary.overall_roas,
-    wasted_pct:        p.summary.wasted_pct,
-    high_negatives:    p.phrase_high.length,
-    medium_negatives:  p.phrase_medium.length,
-    pt_negatives:      p.pt_negatives.length,
-    harvest_kw:        p.harvest_candidates.length,
-    harvest_pt:        p.pt_harvest.length,
-    // Health signal: red = wasted > 30% or HIGH negatives > 3
-    //                amber = wasted 15-30% or HIGH negatives 1-3
-    //                green = wasted < 15% and no HIGH negatives
-    health: (() => {
-      const w = p.summary.wasted_pct
-      const h = p.phrase_high.length + p.pt_negatives.filter((n: any) => n.priority === 'HIGH').length
-      if (w > 0.30 || h > 3) return 'red'
-      if (w > 0.15 || h > 0) return 'amber'
-      return 'green'
-    })(),
-  })).sort((a, b) => b.total_wasted - a.total_wasted)
-
-  return {
-    is_bulk: true,
-    portfolios: portfolioNames,
-    portfolio_health: portfolioHealth,
-    portfolio_results: portfolioResults,
-    account: { ...accountKw, ...accountPt },
+  } catch (err: any) {
+    console.error('PPC analysis error:', err)
+    return NextResponse.json({ error: err.message ?? 'Analysis failed' }, { status: 500 })
   }
 }
 
-// ── API ROUTE POST ────────────────────────────────────────────────────────────
-// ── GET: load saved results for a run ────────────────────────────────────────
+// ── GET: load all portfolio runs for a bulk upload ────────────────────────────
+// Used by dashboard to build the full sidebar
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = createServerSupabaseClient()
@@ -383,207 +419,40 @@ export async function GET(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { searchParams } = new URL(request.url)
-    const runId = searchParams.get('run_id')
-    const orgId = searchParams.get('org_id')
-    if (!runId || !orgId) return NextResponse.json({ error: 'Missing run_id or org_id' }, { status: 400 })
+    const uploadId = searchParams.get('upload_id')
+    const orgId    = searchParams.get('org_id')
+    if (!uploadId || !orgId) return NextResponse.json({ error: 'Missing upload_id or org_id' }, { status: 400 })
 
-    const { data: run } = await supabase
+    // Get all runs for this bulk upload
+    const { data: runs } = await supabase
       .from('ppc_analysis_runs')
-      .select('id, results_json, analysed_at, run_name, upload_ids, is_bulk_run, date_range_days')
-      .eq('id', runId).eq('org_id', orgId).single()
+      .select('id, portfolio, run_name, analysed_at, total_spend, total_wasted, high_negatives, harvest_candidates, results_json')
+      .eq('org_id', orgId)
+      .eq('is_bulk_run', true)
+      .contains('upload_ids', [uploadId])
+      .order('total_spend', { ascending: false })
 
-    if (!run) return NextResponse.json({ error: 'Run not found' }, { status: 404 })
-    if (!run.results_json) return NextResponse.json({ has_results: false })
-
-    return NextResponse.json({
-      has_results: true,
-      analysis_run_id: run.id,
-      analysed_at: run.analysed_at,
-      results: run.results_json,
-      existing_decisions: [],
-      is_duplicate_run: false,
-    })
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message ?? 'Failed' }, { status: 500 })
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const supabase = createServerSupabaseClient()  // [U1]
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-    const { upload_ids, date_range_days, org_id, brand, run_name, force, selected_portfolios } = await request.json()
-    if (!upload_ids?.length || !date_range_days || !org_id) {
-      return NextResponse.json({ error: 'Missing: upload_ids, date_range_days, org_id' }, { status: 400 })
-    }
-
-    // Fetch upload metadata + term rows in parallel [A5]
-    const { data: uploadMeta } = await supabase.from('ppc_uploads')
-      .select('asin, report_start_date, report_end_date, campaign_name, campaign_type, is_bulk_file, portfolios')
-      .in('id', upload_ids)
-
-    const isBulk = (uploadMeta ?? []).some((u: any) => u.is_bulk_file)
-
-    // Paginate Supabase query — filter by portfolio IN the query, not after
-    // This is the critical fix: for 5 selected portfolios we fetch ~5000 rows not 29000
-    const allTermRows: any[] = []
-    const PAGE = 1000
-    let offset = 0
-    while (true) {
-      let query = supabase
-        .from('ppc_search_terms')
-        .select('search_term, campaign_name, portfolio, targeting_type, pt_expression, cost, purchases, sales, matched_keyword')
-        .in('upload_id', upload_ids)
-        .eq('org_id', org_id)
-      // Apply portfolio filter IN the DB query — not after fetching all rows
-      if (isBulk && selected_portfolios?.length) {
-        query = query.in('portfolio', selected_portfolios)
+    // Build portfolio health for sidebar
+    const portfolioRuns = (runs ?? []).filter((r: any) => r.portfolio).map((r: any) => {
+      const wasted_pct = r.total_spend > 0 ? r.total_wasted / r.total_spend : 0
+      const high       = r.high_negatives ?? 0
+      return {
+        portfolio:         r.portfolio,
+        run_id:            r.id,
+        analysed_at:       r.analysed_at,
+        total_spend:       r.total_spend,
+        total_wasted:      r.total_wasted,
+        wasted_pct,
+        high_negatives:    high,
+        harvest_candidates: r.harvest_candidates,
+        has_results:       !!r.results_json,
+        health: wasted_pct > 0.30 || high > 3 ? 'red' : wasted_pct > 0.15 || high > 0 ? 'amber' : 'green',
       }
-      const { data, error } = await query.range(offset, offset + PAGE - 1)
-      if (error) throw error
-      if (data?.length) allTermRows.push(...data)
-      if (!data?.length || data.length < PAGE) break
-      offset += PAGE
-    }
-    const filteredRows = allTermRows
-
-    if (!filteredRows?.length) return NextResponse.json({ error: 'No data found for these uploads' }, { status: 404 })
-
-    const existingKeywords = [...new Set(filteredRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
-
-    // [A5] Build auto run name
-    const asins        = [...new Set((uploadMeta ?? []).map((u: any) => u.asin).filter(Boolean))]
-    const dates        = (uploadMeta ?? []).flatMap((u: any) => [u.report_start_date, u.report_end_date].filter(Boolean))
-    const startDate    = dates.length ? dates.reduce((a: string, b: string) => a < b ? a : b) : null
-    const endDate      = dates.length ? dates.reduce((a: string, b: string) => a > b ? a : b) : null
-    const fmt          = (d: string | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : null
-    const dateLabel    = startDate && endDate && startDate !== endDate ? `${fmt(startDate)} – ${fmt(endDate)}` : startDate ? fmt(startDate)! : null
-    const autoRunName  = [brand, asins.length ? asins.join(', ') : null, dateLabel, isBulk ? 'Full account bulk' : null].filter(Boolean).join(' · ')
-
-    // [A3] Duplicate run detection — must come before saved results check
-    const sortedIds = [...upload_ids].sort()
-    const { data: existingRuns } = await supabase
-      .from('ppc_analysis_runs').select('id, upload_ids, run_at, is_bulk_run')
-      .eq('org_id', org_id).order('run_at', { ascending: false }).limit(20)
-
-    const duplicate = existingRuns?.find((r: any) => {
-      const sorted = [...(r.upload_ids ?? [])].sort()
-      const idsMatch = sorted.length === sortedIds.length && sorted.every((id: string, i: number) => id === sortedIds[i])
-      // Only reuse a run if the bulk flag matches — don't reuse pre-portfolio runs
-      const bulkMatches = (r.is_bulk_run ?? false) === isBulk
-      return idsMatch && bulkMatches
     })
 
-    // ── CHECK FOR SAVED RESULTS ──────────────────────────────────────────────
-    // If this run already has results saved and force=true is not set, return them instantly
-    if (!force && duplicate?.id) {
-      const { data: savedRun } = await supabase
-        .from('ppc_analysis_runs')
-        .select('results_json, analysed_at')
-        .eq('id', duplicate.id)
-        .single()
-
-      if (savedRun?.results_json) {
-        const { data: existingDecisions } = await supabase
-          .from('ppc_decisions_log')
-          .select('term, match_type, status, campaign_names, notes, is_generic_flag, decided_at, portfolio')
-          .eq('analysis_run_id', duplicate.id)
-          .order('decided_at', { ascending: false })
-
-        return NextResponse.json({
-          analysis_run_id:    duplicate.id,
-          is_duplicate_run:   true,
-          from_cache:         true,
-          analysed_at:        savedRun.analysed_at,
-          existing_decisions: existingDecisions ?? [],
-          results:            savedRun.results_json,
-        })
-      }
-    }
-
-    const results = await runAnalysis(filteredRows as SearchTermRow[], date_range_days, existingKeywords, isBulk)
-
-    let runData: any
-    if (duplicate) {
-      runData = duplicate
-    } else {
-      const summary = isBulk ? results.account.summary : (results as any).account.summary
-      const { data: inserted, error: runError } = await supabase
-        .from('ppc_analysis_runs').insert({
-          org_id, brand: brand ?? null,
-          asin: asins[0] ?? null,                         // [A6]
-          report_start_date: startDate ?? null,            // [A6]
-          report_end_date: endDate ?? null,                // [A6]
-          run_name: run_name ?? autoRunName ?? `Analysis ${new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })}`,
-          upload_ids, date_range_days,
-          is_bulk_run: isBulk,
-          portfolio: (selected_portfolios?.length === 1) ? selected_portfolios[0] : null,
-          portfolio_roas:    summary.overall_roas,
-          total_spend:       summary.total_spend,
-          total_wasted:      summary.total_wasted,
-          total_terms:       summary.total_terms,
-          high_negatives:    isBulk ? (results.portfolio_health ?? []).reduce((s: number, p: any) => s + p.high_negatives, 0) : (results as any).account.phrase_high.length,
-          medium_negatives:  isBulk ? (results.portfolio_health ?? []).reduce((s: number, p: any) => s + p.medium_negatives, 0) : (results as any).account.phrase_medium.length,
-          harvest_candidates: isBulk ? (results.portfolio_health ?? []).reduce((s: number, p: any) => s + p.harvest_kw, 0) : (results as any).account.harvest_candidates.length,
-          run_by: user.id,
-        }).select().single()
-      if (runError) throw runError
-      runData = inserted
-    }
-
-    // [A4] Carry forward existing decisions
-    const { data: existingDecisions } = await supabase
-      .from('ppc_decisions_log')
-      .select('term, match_type, status, campaign_names, notes, is_generic_flag, decided_at, portfolio')
-      .eq('analysis_run_id', runData.id)
-      .order('decided_at', { ascending: false })
-
-    // ── SAVE RESULTS TO DB ───────────────────────────────────────────────────
-    // Trim n-gram tables before saving — UI only shows top 20/20/15 anyway
-    // Full tables are 14MB+; trimmed is ~285KB, well within Supabase 1MB limit
-    const trimNgrams = (r: any) => r ? {
-      ...r,
-      ngrams: {
-        uni: (r.ngrams?.uni ?? []).slice(0, 20),
-        bi:  (r.ngrams?.bi  ?? []).slice(0, 20),
-        tri: (r.ngrams?.tri ?? []).slice(0, 15),
-      }
-    } : r
-
-    const resultsToSave = results.is_bulk ? {
-      ...results,
-      account: trimNgrams(results.account),
-      portfolio_results: Object.fromEntries(
-        Object.entries(results.portfolio_results ?? {}).map(([k, v]) => [k, trimNgrams(v)])
-      ),
-    } : trimNgrams(results)
-
-    // Save results — failure here should not crash the response
-    const saveError = await supabase
-      .from('ppc_analysis_runs')
-      .update({ results_json: resultsToSave, analysed_at: new Date().toISOString() })
-      .eq('id', runData.id)
-      .then(({ error }) => error?.message ?? null)
-
-    if (saveError) {
-      console.error('Failed to save results_json:', saveError)
-      // Continue — return results even if save failed, user can still see them
-    }
-
-    return NextResponse.json({
-      analysis_run_id:    runData.id,
-      is_duplicate_run:   !!duplicate,   // [A3]
-      from_cache:         false,
-      save_failed:        !!saveError,
-      analysed_at:        new Date().toISOString(),
-      existing_decisions: existingDecisions ?? [],  // [A4]
-      results,
-    })
+    return NextResponse.json({ portfolio_runs: portfolioRuns })
 
   } catch (err: any) {
-    console.error('PPC analysis error:', err)
-    return NextResponse.json({ error: err.message ?? 'Analysis failed' }, { status: 500 })
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
