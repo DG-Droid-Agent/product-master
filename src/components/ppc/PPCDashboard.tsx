@@ -670,31 +670,6 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     return results.portfolio_results?.[activePortfolio] ?? results.account
   }
 
-  if (loading) return (
-    <div style={{ padding: 48, maxWidth: 480, margin: '0 auto' }}>
-      <div style={{ textAlign: 'center' as const, marginBottom: 24 }}>
-        <div style={{ fontSize: 32, marginBottom: 12 }}>⚙️</div>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Running analysis…</div>
-        <div style={{ fontSize: 12, color: 'var(--text3)' }}>{progressMsg}</div>
-      </div>
-      {/* Progress bar */}
-      <div style={{ background: 'var(--surface2)', borderRadius: 8, height: 8, overflow: 'hidden', marginBottom: 12 }}>
-        <div style={{ height: '100%', borderRadius: 8, background: 'var(--accent)', width: `${progress}%`, transition: 'width 0.6s ease' }} />
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text3)' }}>
-        <span>{progress}% complete</span>
-        {isBulk && <span>29 portfolios · 28,947 rows</span>}
-      </div>
-      {isBulk && progress < 50 && (
-        <div style={{ marginTop: 20, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', fontSize: 12, color: 'var(--text3)' }}>
-          ℹ️ Bulk analysis runs across all portfolios — this takes 30-60 seconds the first time. Results will be saved so future opens are instant.
-        </div>
-      )}
-    </div>
-  )
-  if (loadError) return <div style={{ padding: 24 }}><div style={{ color: 'var(--red)', marginBottom: 12 }}>⚠️ {loadError}</div><button className="btn-secondary" onClick={onBack}>← Back</button></div>
-  if (!results) return null
-
   const portData   = getActivePortfolioData()
   const summary    = portData.summary ?? {}
   const health     = results.portfolio_health ?? []
@@ -707,6 +682,37 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     harvest_pt: portData.pt_harvest?.length ?? 0,
     ngrams:     0,
   }
+
+  if (loading) return (
+    <div style={{ padding: 48, maxWidth: 480, margin: '0 auto' }}>
+      <div style={{ textAlign: 'center' as const, marginBottom: 24 }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⚙️</div>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Running analysis…</div>
+        <div style={{ fontSize: 12, color: 'var(--text3)' }}>{progressMsg}</div>
+      </div>
+      <div style={{ background: 'var(--surface2)', borderRadius: 8, height: 8, overflow: 'hidden', marginBottom: 12 }}>
+        <div style={{ height: '100%', borderRadius: 8, background: 'var(--accent)', width: `${progress}%`, transition: 'width 0.6s ease' }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text3)' }}>
+        <span>{progress}% complete</span>
+        {isBulk && <span>All portfolios · bulk run</span>}
+      </div>
+      {isBulk && progress < 50 && (
+        <div style={{ marginTop: 20, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', fontSize: 12, color: 'var(--text3)' }}>
+          ℹ️ First bulk run takes 30-60 seconds. Results are saved — future opens are instant.
+        </div>
+      )}
+    </div>
+  )
+
+  if (loadError) return (
+    <div style={{ padding: 24 }}>
+      <div style={{ color: 'var(--red)', marginBottom: 12 }}>⚠️ {loadError}</div>
+      <button className="btn-secondary" onClick={onBack}>← Back</button>
+    </div>
+  )
+
+  if (!results) return null
 
   return (
     <div style={{ display: 'flex', height: '100%', minHeight: 0 }}>
