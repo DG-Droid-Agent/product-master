@@ -942,8 +942,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     for (const r of (portData.pt_harvest ?? [])) {
       rows.push(['PT Harvest', r.pt_expression, 'Product Target', r.confidence, '', r.roas?.toFixed(2), r.orders, ''])
     }
-    const csv = rows.map(r => r.map(c => '"' + String(c ?? '').replace(/"/g, '""') + '"').join(',')).join('
-')
+    const csv = rows.map(r => r.map(c => '"' + String(c ?? '').replace(/"/g, '""') + '"').join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a'); a.href = url
