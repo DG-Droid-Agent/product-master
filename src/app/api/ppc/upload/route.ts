@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
             date_range_days: dateRangeDays,
             report_start_date: reportStartDate ?? null, report_end_date: reportEndDate ?? null,
             filename: file.name, row_count: rows.length, uploaded_by: user.id,
-            is_bulk_file: true, portfolios,
+            is_bulk_file: true, portfolios, portfolio_summary: portfolioSummary,
           }).select().single()
         if (uploadError) throw uploadError
 

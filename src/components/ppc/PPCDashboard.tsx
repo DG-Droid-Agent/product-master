@@ -616,7 +616,17 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
           {duplicateUploadId && (
             <div style={{ marginTop: 8 }}>
               <button className="btn-primary" style={{ fontSize: 12 }}
-                onClick={() => onDone([duplicateUploadId], dateRange, brand, true, [], [])}>
+                onClick={async () => {
+                  // Fetch portfolio summary for this existing upload so selector can show it
+                  const sb = (await import('@/lib/supabase')).createClient()
+                  const { data: upload } = await sb.from('ppc_uploads')
+                    .select('portfolios, portfolio_summary')
+                    .eq('id', duplicateUploadId)
+                    .single()
+                  const portfolios      = upload?.portfolios ?? []
+                  const portfolioSummary = upload?.portfolio_summary ?? []
+                  onDone([duplicateUploadId!], dateRange, brand, true, portfolios, portfolioSummary)
+                }}>
                 Run analysis on existing upload →
               </button>
             </div>
