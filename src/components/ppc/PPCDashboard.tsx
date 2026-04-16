@@ -1569,8 +1569,30 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
           ? <div className="empty" style={{ height: 160 }}><div className="ei">📂</div><div>No uploads yet — upload a bulk file or individual campaign CSVs to get started</div></div>
           : (
             <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
-              {recentUploads.map(upload => {
-                const uploadRuns = recentRuns.filter(r => (r.upload_ids ?? []).includes(upload.id))
+              {(() => {
+                // Group individual uploads: same brand + same day = one group
+                const bulkUploads = recentUploads.filter(u => u.is_bulk_file)
+                const indivUploads = recentUploads.filter(u => !u.is_bulk_file)
+                
+                // Group individual by brand + upload date
+                const indivGroups: Record<string, typeof indivUploads> = {}
+                for (const u of indivUploads) {
+                  const day = new Date(u.uploaded_at).toLocaleDateString('en-GB')
+                  const key = `${u.brand ?? 'Unknown'}_${day}`
+                  if (!indivGroups[key]) indivGroups[key] = []
+                  indivGroups[key].push(u)
+                }
+
+                const allItems = [
+                  ...bulkUploads.map(u => ({ type: 'bulk' as const, upload: u, group: null })),
+                  ...Object.entries(indivGroups).map(([key, uploads]) => ({ type: 'group' as const, upload: uploads[0], group: uploads })),
+                ]
+
+                return allItems.map(item => {
+                const upload = item.upload
+                const groupUploads = item.group ?? [upload]
+                const allGroupIds = groupUploads.map(u => u.id)
+                const uploadRuns = recentRuns.filter(r => (r.upload_ids ?? []).some((id: string) => allGroupIds.includes(id)))
                 const donePorts  = uploadRuns.filter(r => r.portfolio).map(r => r.portfolio)
                 const totalPorts = upload.portfolios?.length ?? 0
                 const isBulk     = upload.is_bulk_file
@@ -1586,11 +1608,13 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                           {upload.brand && <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>{upload.brand}</span>}
                           {isBulk
                             ? <Badge color="#7c3aed" bg="rgba(124,58,237,.08)">Bulk · {totalPorts} portfolios</Badge>
-                            : <span style={{ fontSize: 12, fontWeight: 600 }}>{upload.filename?.replace(/\.(csv|xlsx)$/i, '')}</span>
+                            : item.group && item.group.length > 1
+                              ? <Badge color="#0f766e" bg="rgba(15,118,110,.08)">{item.group.length} campaigns</Badge>
+                              : <span style={{ fontSize: 12, fontWeight: 600 }}>{upload.filename?.replace(/\.(csv|xlsx)$/i, '')}</span>
                           }
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', gap: 10 }}>
-                          <span>{(upload.row_count ?? 0).toLocaleString()} rows</span>
+                          <span>{(item.group ? item.group.reduce((s: number, u: any) => s + (u.row_count ?? 0), 0) : (upload.row_count ?? 0)).toLocaleString()} rows</span>
                           <span>Uploaded {new Date(upload.uploaded_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                           {isBulk && donePorts.length > 0 && <span style={{ color: '#166534', fontWeight: 600 }}>✓ {donePorts.length}/{totalPorts} portfolios analysed</span>}
                           {isBulk && donePorts.length === 0 && <span>No portfolios analysed yet</span>}
@@ -1614,7 +1638,10 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                             setSelectedPortfolios(remaining.length > 0 ? remaining : [])
                             setView('portfolio_select')
                           } else {
-                            setSelectedPortfolios(uploadRuns[0]?.portfolio ? [uploadRuns[0].portfolio] : [''])
+                            // Individual upload group — no portfolio needed
+                            setUploadIds(allGroupIds)
+                            setUploadDays(uploadRuns[0]?.date_range_days ?? 65)
+                            setSelectedPortfolios([])
                             setView('analysis')
                           }
                         }}>{isBulk ? '＋ Analyse portfolio' : uploadRuns.length > 0 ? '📊 View results' : '▶ Run analysis'}</button>
@@ -1651,6 +1678,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
               })}
             </div>
           )
+        })()
       }
     </div>
   )

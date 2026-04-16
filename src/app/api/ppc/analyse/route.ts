@@ -276,8 +276,8 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { upload_ids, date_range_days, org_id, brand, portfolio, force } = await request.json()
-    if (!upload_ids?.length || !date_range_days || !org_id || !portfolio) {
-      return NextResponse.json({ error: 'Missing: upload_ids, date_range_days, org_id, portfolio' }, { status: 400 })
+    if (!upload_ids?.length || !date_range_days || !org_id) {
+      return NextResponse.json({ error: 'Missing: upload_ids, date_range_days, org_id' }, { status: 400 })
     }
 
     // Fetch upload metadata
@@ -319,25 +319,25 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Fetch rows for this portfolio only — indexed query, fast
+    // Fetch rows — filter by portfolio if provided (bulk), otherwise fetch all
     const allRows: any[] = []
     const PAGE = 1000
     let offset = 0
     while (true) {
-      const { data, error } = await supabase
+      let query = supabase
         .from('ppc_search_terms')
         .select('search_term, campaign_name, portfolio, targeting_type, pt_expression, cost, purchases, sales, matched_keyword')
         .in('upload_id', upload_ids)
         .eq('org_id', org_id)
-        .eq('portfolio', portfolio)
-        .range(offset, offset + PAGE - 1)
+      if (portfolio) query = query.eq('portfolio', portfolio)
+      const { data, error } = await query.range(offset, offset + PAGE - 1)
       if (error) throw error
       if (data?.length) allRows.push(...data)
       if (!data?.length || data.length < PAGE) break
       offset += PAGE
     }
 
-    if (!allRows.length) return NextResponse.json({ error: `No data found for portfolio: ${portfolio}` }, { status: 404 })
+    if (!allRows.length) return NextResponse.json({ error: `No data found for this upload` }, { status: 404 })
 
     const existingKeywords = [...new Set(allRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
     const results = await runPortfolioAnalysis(allRows as SearchTermRow[], date_range_days, existingKeywords)
@@ -363,7 +363,7 @@ export async function POST(request: NextRequest) {
           run_name: runName,
           upload_ids, date_range_days,
           is_bulk_run: true,
-          portfolio,
+          portfolio: portfolio || null,
           portfolio_roas:    results.summary.overall_roas,
           total_spend:       results.summary.total_spend,
           total_wasted:      results.summary.total_wasted,
