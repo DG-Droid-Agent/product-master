@@ -299,12 +299,12 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
 // [A1] NOT exported
 async function runAnalysis(allRows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[], isBulk: boolean) {
   if (!isBulk) {
-    // Individual file — single analysis as before
-    const kwRows = allRows.filter(r => r.targeting_type !== 'pt')
-    const ptRows = allRows.filter(r => r.targeting_type === 'pt')
+    // Individual file — use ALL rows for keyword n-gram analysis
+    // PT rows have valid customer search terms (what the shopper typed)
+    const ptRows   = allRows.filter(r => r.targeting_type === 'pt')
     const campaigns = [...new Set(allRows.map(r => r.campaign_name))]
-    const kwResult = analyseKeywords(kwRows.length ? kwRows : allRows, dateRangeDays, existingKeywords)
-    const ptResult = ptRows.length ? analysePT(ptRows, campaigns) : { pt_negatives: [], pt_harvest: [] }
+    const kwResult  = analyseKeywords(allRows, dateRangeDays, existingKeywords)
+    const ptResult  = ptRows.length ? analysePT(ptRows, campaigns) : { pt_negatives: [], pt_harvest: [] }
     return {
       is_bulk: false,
       portfolios: null,
@@ -319,12 +319,13 @@ async function runAnalysis(allRows: SearchTermRow[], dateRangeDays: number, exis
   const portfolioResults: Record<string, any> = {}
 
   for (const portfolio of portfolioNames) {
-    const portRows = allRows.filter(r => r.portfolio === portfolio)
-    const kwRows   = portRows.filter(r => r.targeting_type !== 'pt')
-    const ptRows   = portRows.filter(r => r.targeting_type === 'pt')
+    const portRows  = allRows.filter(r => r.portfolio === portfolio)
+    const ptRows    = portRows.filter(r => r.targeting_type === 'pt')
     const campaigns = [...new Set(portRows.map(r => r.campaign_name))]
 
-    const kwResult = analyseKeywords(kwRows, dateRangeDays, existingKeywords)
+    // Use ALL rows for keyword n-gram analysis — customer search terms are valid
+    // regardless of whether the impression came from a keyword or PT targeting
+    const kwResult = analyseKeywords(portRows, dateRangeDays, existingKeywords)
     const ptResult = ptRows.length ? analysePT(ptRows, campaigns) : { pt_negatives: [], pt_harvest: [] }
 
     portfolioResults[portfolio] = {
@@ -334,12 +335,11 @@ async function runAnalysis(allRows: SearchTermRow[], dateRangeDays: number, exis
     }
   }
 
-  // Account-level totals (all rows combined, keyword only for n-gram)
-  const allKwRows = allRows.filter(r => r.targeting_type !== 'pt')
-  const allPtRows = allRows.filter(r => r.targeting_type === 'pt')
+  // Account-level totals — use ALL rows for keyword n-gram analysis
+  const allPtRows    = allRows.filter(r => r.targeting_type === 'pt')
   const allCampaigns = [...new Set(allRows.map(r => r.campaign_name))]
-  const accountKw = analyseKeywords(allKwRows, dateRangeDays, existingKeywords)
-  const accountPt = analysePT(allPtRows, allCampaigns)
+  const accountKw    = analyseKeywords(allRows, dateRangeDays, existingKeywords)
+  const accountPt    = analysePT(allPtRows, allCampaigns)
 
   // Portfolio health summary for sidebar colour coding
   const portfolioHealth = Object.values(portfolioResults).map((p: any) => ({
@@ -387,16 +387,28 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch upload metadata + term rows in parallel [A5]
-    const [{ data: uploadMeta }, { data: termRows, error: termError }] = await Promise.all([
-      supabase.from('ppc_uploads')
-        .select('asin, report_start_date, report_end_date, campaign_name, campaign_type, is_bulk_file, portfolios')
-        .in('id', upload_ids),
-      supabase.from('ppc_search_terms')
-        .select('search_term, campaign_name, portfolio, targeting_type, pt_expression, cost, purchases, sales, matched_keyword')
-        .in('upload_id', upload_ids).eq('org_id', org_id),
-    ])
+    const { data: uploadMeta } = await supabase.from('ppc_uploads')
+      .select('asin, report_start_date, report_end_date, campaign_name, campaign_type, is_bulk_file, portfolios')
+      .in('id', upload_ids)
 
-    if (termError) throw termError
+    // Supabase default row limit is 1000 — paginate to get all rows for bulk files
+    const allTermRows: any[] = []
+    const PAGE = 1000
+    let offset = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('ppc_search_terms')
+        .select('search_term, campaign_name, portfolio, targeting_type, pt_expression, cost, purchases, sales, matched_keyword')
+        .in('upload_id', upload_ids)
+        .eq('org_id', org_id)
+        .range(offset, offset + PAGE - 1)
+      if (error) throw error
+      if (data?.length) allTermRows.push(...data)
+      if (!data?.length || data.length < PAGE) break
+      offset += PAGE
+    }
+    const termRows = allTermRows
+
     if (!termRows?.length) return NextResponse.json({ error: 'No data found for these uploads' }, { status: 404 })
 
     const isBulk = (uploadMeta ?? []).some((u: any) => u.is_bulk_file)
@@ -416,12 +428,15 @@ export async function POST(request: NextRequest) {
     // [A3] Duplicate run detection
     const sortedIds = [...upload_ids].sort()
     const { data: existingRuns } = await supabase
-      .from('ppc_analysis_runs').select('id, upload_ids, run_at')
+      .from('ppc_analysis_runs').select('id, upload_ids, run_at, is_bulk_run')
       .eq('org_id', org_id).order('run_at', { ascending: false }).limit(20)
 
     const duplicate = existingRuns?.find((r: any) => {
       const sorted = [...(r.upload_ids ?? [])].sort()
-      return sorted.length === sortedIds.length && sorted.every((id: string, i: number) => id === sortedIds[i])
+      const idsMatch = sorted.length === sortedIds.length && sorted.every((id: string, i: number) => id === sortedIds[i])
+      // Only reuse a run if the bulk flag matches — don't reuse pre-portfolio runs
+      const bulkMatches = (r.is_bulk_run ?? false) === isBulk
+      return idsMatch && bulkMatches
     })
 
     let runData: any
