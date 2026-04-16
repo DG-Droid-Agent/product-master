@@ -141,15 +141,9 @@ export async function POST(request: NextRequest) {
 
       if (bulk) {
         // ── BULK FILE ─────────────────────────────────────────────────────
-        const { rows, portfolios, portfolioSummary } = parseBulkFile(buffer)
-        if (!rows.length) {
-          return NextResponse.json({ error: `No valid rows in bulk file: ${file.name}` }, { status: 400 })
-        }
-
         const bulkCampaignName = `BULK:${file.name}`
 
-        // [U3] Bulk duplicate check — always by filename, never allow same file twice
-        // Do NOT gate on dates — bulk files don't require dates to be entered
+        // [U3] Bulk duplicate check FIRST — before parsing the file (saves 887MB + 19s)
         const { data: existingBulk } = await supabase
           .from('ppc_uploads').select('id, uploaded_at')
           .eq('org_id', orgId)
@@ -164,6 +158,12 @@ export async function POST(request: NextRequest) {
             campaign_name: bulkCampaignName,
             existing_upload_id: existingBulk[0].id,
           }, { status: 409 })
+        }
+
+        // Only parse the file after confirming it's not a duplicate
+        const { rows, portfolios, portfolioSummary } = parseBulkFile(buffer)
+        if (!rows.length) {
+          return NextResponse.json({ error: `No valid rows in bulk file: ${file.name}` }, { status: 400 })
         }
 
         const { data: upload, error: uploadError } = await supabase

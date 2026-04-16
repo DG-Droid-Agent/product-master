@@ -438,9 +438,10 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate]     = useState('')
   const [dragOver, setDragOver]   = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError]         = useState<string | null>(null)
-  const [bulkDetected, setBulkDetected] = useState(false)
+  const [uploading, setUploading]           = useState(false)
+  const [error, setError]                   = useState<string | null>(null)
+  const [bulkDetected, setBulkDetected]     = useState(false)
+  const [duplicateUploadId, setDuplicateUploadId] = useState<string | null>(null)
 
   const addFiles = useCallback((files: File[]) => {
     const valid = files.filter(f => /\.(csv|xlsx)$/i.test(f.name))
@@ -475,7 +476,16 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
 
       const res  = await fetch('/api/ppc/upload', { method: 'POST', body: form })
       const json = await res.json()
-      if (!res.ok) { setError(json.duplicate ? `Duplicate: "${json.campaign_name}" already uploaded for this date range` : json.error ?? 'Upload failed'); return }
+      if (!res.ok) {
+        if (json.duplicate && json.existing_upload_id) {
+          // Duplicate bulk file — offer to run analysis on existing upload
+          setDuplicateUploadId(json.existing_upload_id)
+          setError(json.error ?? 'Duplicate upload')
+        } else {
+          setError(json.error ?? 'Upload failed')
+        }
+        return
+      }
 
       const firstUpload     = json.uploads[0]
       const isBulk          = firstUpload.is_bulk ?? false
@@ -569,7 +579,19 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
         ))}
       </div>
 
-      {error && <div style={{ background: 'rgba(220,38,38,.08)', border: '1px solid rgba(220,38,38,.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#dc2626' }}>⚠️ {error}</div>}
+      {error && (
+        <div style={{ background: 'rgba(220,38,38,.08)', border: '1px solid rgba(220,38,38,.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#dc2626' }}>
+          ⚠️ {error}
+          {duplicateUploadId && (
+            <div style={{ marginTop: 8 }}>
+              <button className="btn-primary" style={{ fontSize: 12 }}
+                onClick={() => onDone([duplicateUploadId], dateRange, brand, true, [], [])}>
+                Run analysis on existing upload →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button className="btn-primary" onClick={handleUpload} disabled={uploading || !entries.length} style={{ opacity: uploading || !entries.length ? 0.5 : 1 }}>
