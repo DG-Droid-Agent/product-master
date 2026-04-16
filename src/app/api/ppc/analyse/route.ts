@@ -375,13 +375,46 @@ async function runAnalysis(allRows: SearchTermRow[], dateRangeDays: number, exis
 }
 
 // ── API ROUTE POST ────────────────────────────────────────────────────────────
+// ── GET: load saved results for a run ────────────────────────────────────────
+export async function GET(request: NextRequest) {
+  try {
+    const supabase = createServerSupabaseClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+    const { searchParams } = new URL(request.url)
+    const runId = searchParams.get('run_id')
+    const orgId = searchParams.get('org_id')
+    if (!runId || !orgId) return NextResponse.json({ error: 'Missing run_id or org_id' }, { status: 400 })
+
+    const { data: run } = await supabase
+      .from('ppc_analysis_runs')
+      .select('id, results_json, analysed_at, run_name, upload_ids, is_bulk_run, date_range_days')
+      .eq('id', runId).eq('org_id', orgId).single()
+
+    if (!run) return NextResponse.json({ error: 'Run not found' }, { status: 404 })
+    if (!run.results_json) return NextResponse.json({ has_results: false })
+
+    return NextResponse.json({
+      has_results: true,
+      analysis_run_id: run.id,
+      analysed_at: run.analysed_at,
+      results: run.results_json,
+      existing_decisions: [],
+      is_duplicate_run: false,
+    })
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? 'Failed' }, { status: 500 })
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = createServerSupabaseClient()  // [U1]
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { upload_ids, date_range_days, org_id, brand, run_name } = await request.json()
+    const { upload_ids, date_range_days, org_id, brand, run_name, force } = await request.json()
     if (!upload_ids?.length || !date_range_days || !org_id) {
       return NextResponse.json({ error: 'Missing: upload_ids, date_range_days, org_id' }, { status: 400 })
     }
@@ -422,6 +455,33 @@ export async function POST(request: NextRequest) {
     const fmt          = (d: string | null) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : null
     const dateLabel    = startDate && endDate && startDate !== endDate ? `${fmt(startDate)} – ${fmt(endDate)}` : startDate ? fmt(startDate)! : null
     const autoRunName  = [brand, asins.length ? asins.join(', ') : null, dateLabel, isBulk ? 'Full account bulk' : null].filter(Boolean).join(' · ')
+
+    // ── CHECK FOR SAVED RESULTS ──────────────────────────────────────────────
+    // If this run already has results saved and force=true is not set, return them instantly
+    if (!force && duplicate?.id) {
+      const { data: savedRun } = await supabase
+        .from('ppc_analysis_runs')
+        .select('results_json, analysed_at')
+        .eq('id', duplicate.id)
+        .single()
+
+      if (savedRun?.results_json) {
+        const { data: existingDecisions } = await supabase
+          .from('ppc_decisions_log')
+          .select('term, match_type, status, campaign_names, notes, is_generic_flag, decided_at, portfolio')
+          .eq('analysis_run_id', duplicate.id)
+          .order('decided_at', { ascending: false })
+
+        return NextResponse.json({
+          analysis_run_id:    duplicate.id,
+          is_duplicate_run:   true,
+          from_cache:         true,
+          analysed_at:        savedRun.analysed_at,
+          existing_decisions: existingDecisions ?? [],
+          results:            savedRun.results_json,
+        })
+      }
+    }
 
     const results = await runAnalysis(termRows as SearchTermRow[], date_range_days, existingKeywords, isBulk)
 
@@ -473,9 +533,18 @@ export async function POST(request: NextRequest) {
       .eq('analysis_run_id', runData.id)
       .order('decided_at', { ascending: false })
 
+    // ── SAVE RESULTS TO DB ───────────────────────────────────────────────────
+    // Store results_json so future opens are instant (no re-running the engine)
+    await supabase
+      .from('ppc_analysis_runs')
+      .update({ results_json: results, analysed_at: new Date().toISOString() })
+      .eq('id', runData.id)
+
     return NextResponse.json({
       analysis_run_id:    runData.id,
       is_duplicate_run:   !!duplicate,   // [A3]
+      from_cache:         false,
+      analysed_at:        new Date().toISOString(),
       existing_decisions: existingDecisions ?? [],  // [A4]
       results,
     })

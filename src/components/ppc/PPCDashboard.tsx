@@ -487,6 +487,10 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
 }) {
   const supabase = createClient()
   const [loading, setLoading]         = useState(true)
+  const [progress, setProgress]       = useState(0)
+  const [progressMsg, setProgressMsg] = useState('Starting analysis…')
+  const [fromCache, setFromCache]     = useState(false)
+  const [analysedAt, setAnalysedAt]   = useState<string | null>(null)
   const [results, setResults]         = useState<any>(null)
   const [runId, setRunId]             = useState<string | null>(null)
   const [loadError, setLoadError]     = useState('')
@@ -501,17 +505,48 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const [prevDecs, setPrevDecs]       = useState<any[]>([])
   const [histExp, setHistExp]         = useState(false)
 
-  useEffect(() => {
-    const run = async () => {
-      try {
-        const [res, prevRes] = await Promise.all([
-          fetch('/api/ppc/analyse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand }) }),
-          brand ? supabase.from('ppc_analysis_runs').select('id,run_name,run_at,total_spend,total_wasted,high_negatives,harvest_candidates,date_range_days').eq('org_id', orgId).eq('brand', brand).order('run_at', { ascending: false }).limit(3) : Promise.resolve({ data: [] }),
-        ])
-        const json = await res.json()
-        if (!res.ok) throw new Error(json.error)
-        setResults(json.results)
-        setRunId(json.analysis_run_id)
+  const runAnalysis = async (force = false) => {
+    setLoading(true); setLoadError(''); setProgress(0)
+
+    // Simulate progress steps while waiting for the API
+    const steps = [
+      [10, 'Fetching data from database…'],
+      [25, 'Loading search term rows…'],
+      [45, 'Running n-gram analysis…'],
+      [60, 'Analysing PT targets…'],
+      [75, 'Scoring harvest candidates…'],
+      [88, 'Building portfolio health…'],
+      [95, 'Finalising results…'],
+    ]
+    let stepIdx = 0
+    const ticker = setInterval(() => {
+      if (stepIdx < steps.length) {
+        const [pct, msg] = steps[stepIdx++]
+        setProgress(pct as number)
+        setProgressMsg(msg as string)
+      }
+    }, isBulk ? 3000 : 1000)  // bulk takes longer
+
+    try {
+      const [res, prevRes] = await Promise.all([
+        fetch('/api/ppc/analyse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force }) }),
+        brand ? supabase.from('ppc_analysis_runs').select('id,run_name,run_at,total_spend,total_wasted,high_negatives,harvest_candidates,date_range_days').eq('org_id', orgId).eq('brand', brand).order('run_at', { ascending: false }).limit(3) : Promise.resolve({ data: [] }),
+      ])
+      clearInterval(ticker)
+      setProgress(98); setProgressMsg('Processing results…')
+
+      // Handle non-JSON responses (Vercel timeout returns HTML)
+      const text = await res.text()
+      let json: any
+      try { json = JSON.parse(text) }
+      catch { throw new Error(`Server error (${res.status}) — the analysis may have timed out. Try again or contact support.`) }
+
+      if (!res.ok) throw new Error(json.error ?? 'Analysis failed')
+      setProgress(100); setProgressMsg('Done!')
+      setResults(json.results)
+      setRunId(json.analysis_run_id)
+      setFromCache(json.from_cache ?? false)
+      setAnalysedAt(json.analysed_at ?? null)
 
         // [A4] Pre-populate decision map from existing decisions
         if (json.existing_decisions?.length) {
@@ -550,11 +585,12 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
           const { data } = await supabase.from('ppc_decisions_log').select('term,match_type,status,campaign_names,roas_at_decision,wasted_at_decision').eq('analysis_run_id', prior.id).in('status', ['actioned','not_actioning','reversed']).limit(20)
           setPrevDecs(data ?? [])
         }
-      } catch (err: any) { setLoadError(err.message) }
+      } catch (err: any) { clearInterval(ticker); setLoadError(err.message) }
       finally { setLoading(false) }
     }
-    run()
-  }, [])
+  }
+
+  useEffect(() => { runAnalysis(false) }, [])
 
   // [D2] toggle with auto-pre-select recommended campaigns
   const toggle = (key: string, recCampaigns?: string[]) => {
@@ -634,7 +670,28 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     return results.portfolio_results?.[activePortfolio] ?? results.account
   }
 
-  if (loading) return <div style={{ padding: 48, textAlign: 'center' as const }}><div style={{ fontSize: 32, marginBottom: 12 }}>⚙️</div><div style={{ fontSize: 15, fontWeight: 600 }}>Running analysis…</div><div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>N-gram extraction · PT analysis · Significance testing</div></div>
+  if (loading) return (
+    <div style={{ padding: 48, maxWidth: 480, margin: '0 auto' }}>
+      <div style={{ textAlign: 'center' as const, marginBottom: 24 }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>⚙️</div>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Running analysis…</div>
+        <div style={{ fontSize: 12, color: 'var(--text3)' }}>{progressMsg}</div>
+      </div>
+      {/* Progress bar */}
+      <div style={{ background: 'var(--surface2)', borderRadius: 8, height: 8, overflow: 'hidden', marginBottom: 12 }}>
+        <div style={{ height: '100%', borderRadius: 8, background: 'var(--accent)', width: `${progress}%`, transition: 'width 0.6s ease' }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text3)' }}>
+        <span>{progress}% complete</span>
+        {isBulk && <span>29 portfolios · 28,947 rows</span>}
+      </div>
+      {isBulk && progress < 50 && (
+        <div style={{ marginTop: 20, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', fontSize: 12, color: 'var(--text3)' }}>
+          ℹ️ Bulk analysis runs across all portfolios — this takes 30-60 seconds the first time. Results will be saved so future opens are instant.
+        </div>
+      )}
+    </div>
+  )
   if (loadError) return <div style={{ padding: 24 }}><div style={{ color: 'var(--red)', marginBottom: 12 }}>⚠️ {loadError}</div><button className="btn-secondary" onClick={onBack}>← Back</button></div>
   if (!results) return null
 
@@ -718,7 +775,17 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
               {isBulkRes && activePortfolio !== '__account__' && <> · <span style={{ color: 'var(--text3)' }}>{summary.campaigns?.length} campaigns</span></>}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {fromCache && analysedAt && (
+              <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+                Saved {new Date(analysedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+            {fromCache && (
+              <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => runAnalysis(true)} title="Re-run the analysis engine with latest data">
+                🔄 Refresh analysis
+              </button>
+            )}
             <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => runId && onGoDecisions(runId)}>View decisions log</button>
             <button className="btn-secondary" style={{ fontSize: 12 }} onClick={onBack}>＋ New upload</button>
           </div>
