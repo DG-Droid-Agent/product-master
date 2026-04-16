@@ -424,32 +424,32 @@ export async function POST(request: NextRequest) {
       .select('asin, report_start_date, report_end_date, campaign_name, campaign_type, is_bulk_file, portfolios')
       .in('id', upload_ids)
 
-    // Supabase default row limit is 1000 — paginate to get all rows for bulk files
+    const isBulk = (uploadMeta ?? []).some((u: any) => u.is_bulk_file)
+
+    // Paginate Supabase query — filter by portfolio IN the query, not after
+    // This is the critical fix: for 5 selected portfolios we fetch ~5000 rows not 29000
     const allTermRows: any[] = []
     const PAGE = 1000
     let offset = 0
     while (true) {
-      const { data, error } = await supabase
+      let query = supabase
         .from('ppc_search_terms')
         .select('search_term, campaign_name, portfolio, targeting_type, pt_expression, cost, purchases, sales, matched_keyword')
         .in('upload_id', upload_ids)
         .eq('org_id', org_id)
-        .range(offset, offset + PAGE - 1)
+      // Apply portfolio filter IN the DB query — not after fetching all rows
+      if (isBulk && selected_portfolios?.length) {
+        query = query.in('portfolio', selected_portfolios)
+      }
+      const { data, error } = await query.range(offset, offset + PAGE - 1)
       if (error) throw error
       if (data?.length) allTermRows.push(...data)
       if (!data?.length || data.length < PAGE) break
       offset += PAGE
     }
-    const termRows = allTermRows
+    const filteredRows = allTermRows
 
-    if (!termRows?.length) return NextResponse.json({ error: 'No data found for these uploads' }, { status: 404 })
-
-    const isBulk = (uploadMeta ?? []).some((u: any) => u.is_bulk_file)
-
-    // Filter to selected portfolios if provided — reduces engine work significantly
-    const filteredRows = (isBulk && selected_portfolios?.length)
-      ? termRows.filter((r: any) => selected_portfolios.includes(r.portfolio))
-      : termRows
+    if (!filteredRows?.length) return NextResponse.json({ error: 'No data found for these uploads' }, { status: 404 })
 
     const existingKeywords = [...new Set(filteredRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
 
