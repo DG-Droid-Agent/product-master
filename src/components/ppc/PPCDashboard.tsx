@@ -17,7 +17,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 
-type View       = 'home' | 'upload' | 'analysis' | 'decisions'
+type View       = 'home' | 'upload' | 'portfolio_select' | 'analysis' | 'decisions'
 type Tab        = 'kw_neg' | 'pt_neg' | 'harvest_kw' | 'harvest_pt' | 'ngrams'
 type Health     = 'red' | 'amber' | 'green'
 
@@ -320,12 +320,115 @@ function NGramTable({ rows, label }: { rows: any[]; label: string }) {
 // ── UPLOAD VIEW ───────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── PORTFOLIO SELECTOR VIEW ───────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm, onBack }: {
+  portfolioSummary: any[]
+  selected: string[]
+  onSelect: (v: string[]) => void
+  onConfirm: () => void
+  onBack: () => void
+}) {
+  const toggle = (name: string) => onSelect(
+    selected.includes(name) ? selected.filter(p => p !== name) : [...selected, name]
+  )
+  const selectAll  = () => onSelect(portfolioSummary.map(p => p.name))
+  const selectTop  = (n: number) => onSelect(portfolioSummary.slice(0, n).map(p => p.name))
+  const clearAll   = () => onSelect([])
+
+  const totalSpend    = portfolioSummary.reduce((s, p) => s + p.spend, 0)
+  const selectedSpend = portfolioSummary.filter(p => selected.includes(p.name)).reduce((s, p) => s + p.spend, 0)
+  const selectedRows  = portfolioSummary.filter(p => selected.includes(p.name)).reduce((s, p) => s + p.rows, 0)
+
+  return (
+    <div style={{ padding: 24, maxWidth: 680 }}>
+      <button onClick={onBack} style={{ fontSize: 11, color: 'var(--text3)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: 12 }}>← Back to upload</button>
+      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Select portfolios to analyse</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 20 }}>
+        Choose which portfolios to run the analysis on. Fewer portfolios = faster analysis. De-select inactive or test portfolios.
+      </div>
+
+      {/* Summary bar */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 20 }}>
+        <div>
+          <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>Selected</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{selected.length} of {portfolioSummary.length} portfolios</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>Selected spend</div>
+          <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--mono)' }}>${selectedSpend.toFixed(0)} <span style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 400 }}>of ${totalSpend.toFixed(0)}</span></div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>Rows to analyse</div>
+          <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'var(--mono)' }}>{selectedRows.toLocaleString()}</div>
+        </div>
+        <div style={{ flex: 1 }} />
+        {/* Quick select buttons */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[5, 10, 15].map(n => (
+            <button key={n} onClick={() => selectTop(n)} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface2)', cursor: 'pointer', color: 'var(--text)' }}>
+              Top {n}
+            </button>
+          ))}
+          <button onClick={selectAll} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface2)', cursor: 'pointer', color: 'var(--text)' }}>All</button>
+          <button onClick={clearAll} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--surface2)', cursor: 'pointer', color: 'var(--text)' }}>None</button>
+        </div>
+      </div>
+
+      {/* Portfolio list */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
+        {portfolioSummary.map((p, i) => {
+          const isSelected = selected.includes(p.name)
+          const pct = totalSpend > 0 ? (p.spend / totalSpend * 100) : 0
+          return (
+            <div key={p.name} onClick={() => toggle(p.name)} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', cursor: 'pointer',
+              background: isSelected ? 'var(--accent-light)' : 'var(--surface)',
+              borderBottom: i < portfolioSummary.length - 1 ? '1px solid var(--border)' : 'none',
+            }}>
+              <input type="checkbox" checked={isSelected} onChange={() => toggle(p.name)}
+                onClick={e => e.stopPropagation()}
+                style={{ width: 15, height: 15, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: isSelected ? 600 : 400, marginBottom: 3 }}>{p.name}</div>
+                {/* Spend bar */}
+                <div style={{ background: 'var(--surface2)', borderRadius: 3, height: 4, overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: isSelected ? 'var(--accent)' : 'var(--border)', borderRadius: 3 }} />
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' as const, flexShrink: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, fontFamily: 'var(--mono)' }}>${p.spend.toFixed(0)}</div>
+                <div style={{ fontSize: 10, color: 'var(--text3)' }}>{p.rows.toLocaleString()} rows · {p.campaigns} camps</div>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text3)', minWidth: 36, textAlign: 'right' as const }}>{pct.toFixed(1)}%</div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: 12, color: 'var(--text3)' }}>
+          {selected.length === 0 && <span style={{ color: 'var(--red)' }}>Select at least one portfolio</span>}
+          {selected.length > 0 && `${selected.length} portfolios · ${selectedRows.toLocaleString()} rows · ~${Math.max(10, Math.round(selectedRows / 1000 * 1.5))}s estimated`}
+        </div>
+        <button className="btn-primary" onClick={onConfirm} disabled={selected.length === 0}
+          style={{ opacity: selected.length === 0 ? 0.5 : 1 }}>
+          Analyse {selected.length} portfolio{selected.length !== 1 ? 's' : ''} →
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function inferType(n: string) { return n.includes('auto') ? 'auto' : n.includes('broad') ? 'broad' : n.includes('exact') ? 'exact' : n.includes('phrase') ? 'phrase' : 'other' }
 function cleanName(f: string) { return f.replace(/\.(csv|xlsx)$/i,'').replace(/sponsored_products_searchterm[_\w]*/i,'').replace(/apr_\d+_\d+/i,'').replace(/__+/g,'_').replace(/^_+|_+$/g,'').replace(/_/g,' ').trim() || f.replace(/\.(csv|xlsx)$/i,'') }
 
 interface FileEntry { file: File; campaignName: string; campaignType: string; error: string | null }
 
-function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string; onDone: (ids: string[], days: number, brand: string, isBulk: boolean, portfolios: string[]) => void }) {
+function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string; onDone: (ids: string[], days: number, brand: string, isBulk: boolean, portfolios: string[], portfolioSummary: any[]) => void }) {
   const supabase = createClient()
   const fileRef  = useRef<HTMLInputElement>(null)
   const [brand, setBrand]         = useState('')
@@ -374,11 +477,12 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
       const json = await res.json()
       if (!res.ok) { setError(json.duplicate ? `Duplicate: "${json.campaign_name}" already uploaded for this date range` : json.error ?? 'Upload failed'); return }
 
-      const firstUpload = json.uploads[0]
-      const isBulk      = firstUpload.is_bulk ?? false
-      const portfolios  = firstUpload.portfolios ?? []
-      const ids         = json.uploads.map((u: any) => u.upload_id)
-      onDone(ids, dateRange, brand, isBulk, portfolios)
+      const firstUpload     = json.uploads[0]
+      const isBulk          = firstUpload.is_bulk ?? false
+      const portfolios      = firstUpload.portfolios ?? []
+      const portfolioSummary = firstUpload.portfolio_summary ?? []
+      const ids             = json.uploads.map((u: any) => u.upload_id)
+      onDone(ids, dateRange, brand, isBulk, portfolios, portfolioSummary)
     } catch (err: any) { setError(err.message) }
     finally { setUploading(false) }
   }
@@ -480,9 +584,9 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
 // ── ANALYSIS VIEW (Option A: sidebar + main panel) ────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfolios: initialPortfolios, onBack, onGoDecisions }: {
+function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfolios: initialPortfolios, selectedPortfolios, onBack, onGoDecisions }: {
   uploadIds: string[]; dateRangeDays: number; brand: string; orgId: string
-  isBulk: boolean; portfolios: string[]
+  isBulk: boolean; portfolios: string[]; selectedPortfolios: string[]
   onBack: () => void; onGoDecisions: (runId: string) => void
 }) {
   const supabase = createClient()
@@ -529,7 +633,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
 
     try {
       const [res, prevRes] = await Promise.all([
-        fetch('/api/ppc/analyse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force }) }),
+        fetch('/api/ppc/analyse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force, selected_portfolios: selectedPortfolios?.length ? selectedPortfolios : undefined }) }),
         brand ? supabase.from('ppc_analysis_runs').select('id,run_name,run_at,total_spend,total_wasted,high_negatives,harvest_candidates,date_range_days').eq('org_id', orgId).eq('brand', brand).order('run_at', { ascending: false }).limit(3) : Promise.resolve({ data: [] }),
       ])
       clearInterval(ticker)
@@ -1207,11 +1311,13 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
   const [recentRuns, setRecentRuns]   = useState<any[]>([])
   const [pendingCount, setPendingCount] = useState(0)
   const [loading, setLoading]   = useState(true)
-  const [uploadIds, setUploadIds]     = useState<string[]>([])
-  const [uploadDays, setUploadDays]   = useState(65)
-  const [uploadBrand, setUploadBrand] = useState('')
+  const [uploadIds, setUploadIds]         = useState<string[]>([])
+  const [uploadDays, setUploadDays]       = useState(65)
+  const [uploadBrand, setUploadBrand]     = useState('')
   const [uploadIsBulk, setUploadIsBulk]   = useState(false)
-  const [uploadPortfolios, setUploadPortfolios] = useState<string[]>([])
+  const [uploadPortfolios, setUploadPortfolios]   = useState<string[]>([])
+  const [uploadPortfolioSummary, setUploadPortfolioSummary] = useState<any[]>([])
+  const [selectedPortfolios, setSelectedPortfolios]         = useState<string[]>([])
   const [decisionsRunId, setDecisionsRunId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
@@ -1234,9 +1340,19 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
     load()
   }, [])
 
-  const handleUploadDone = (ids: string[], days: number, brand: string, isBulk: boolean, portfolios: string[]) => {
+  const handleUploadDone = (ids: string[], days: number, brand: string, isBulk: boolean, portfolios: string[], portfolioSummary: any[]) => {
     setUploadIds(ids); setUploadDays(days); setUploadBrand(brand)
-    setUploadIsBulk(isBulk); setUploadPortfolios(portfolios); setView('analysis')
+    setUploadIsBulk(isBulk); setUploadPortfolios(portfolios)
+    setUploadPortfolioSummary(portfolioSummary)
+    if (isBulk && portfolioSummary.length > 0) {
+      // Pre-select portfolios with $50+ spend by default
+      const preSelected = portfolioSummary.filter(p => p.spend >= 50).map(p => p.name)
+      setSelectedPortfolios(preSelected.length > 0 ? preSelected : portfolioSummary.slice(0, 15).map(p => p.name))
+      setView('portfolio_select')
+    } else {
+      setSelectedPortfolios([])
+      setView('analysis')
+    }
   }
 
   const handleGoDecisions = (runId: string) => { setDecisionsRunId(runId); setView('decisions') }
@@ -1244,7 +1360,16 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
   if (!orgId && !loading) return <div style={{ padding: 32, color: 'var(--text3)' }}>No organisation found.</div>
 
   if (view === 'upload')    return <UploadView brands={brands} orgId={orgId!} onDone={handleUploadDone} />
-  if (view === 'analysis')  return <AnalysisView uploadIds={uploadIds} dateRangeDays={uploadDays} brand={uploadBrand} orgId={orgId!} isBulk={uploadIsBulk} portfolios={uploadPortfolios} onBack={() => setView('home')} onGoDecisions={handleGoDecisions} />
+  if (view === 'portfolio_select') return (
+    <PortfolioSelectorView
+      portfolioSummary={uploadPortfolioSummary}
+      selected={selectedPortfolios}
+      onSelect={setSelectedPortfolios}
+      onConfirm={() => setView('analysis')}
+      onBack={() => setView('upload')}
+    />
+  )
+  if (view === 'analysis')  return <AnalysisView uploadIds={uploadIds} dateRangeDays={uploadDays} brand={uploadBrand} orgId={orgId!} isBulk={uploadIsBulk} portfolios={uploadPortfolios} selectedPortfolios={selectedPortfolios} onBack={() => setView('home')} onGoDecisions={handleGoDecisions} />
   if (view === 'decisions') return <DecisionsView orgId={orgId!} brands={brands} initialRunId={decisionsRunId} onBack={() => setView('home')} />
 
   // ── HOME ──────────────────────────────────────────────────────────────────
@@ -1314,7 +1439,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 16 }}>
                     <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px' }}
-                      onClick={() => { if (run.upload_ids?.length) { setUploadIds(run.upload_ids); setUploadDays(run.date_range_days); setUploadBrand(run.brand ?? ''); setUploadIsBulk(run.is_bulk_run ?? false); setUploadPortfolios([]); setView('analysis') } }}>
+                      onClick={() => { if (run.upload_ids?.length) { setUploadIds(run.upload_ids); setUploadDays(run.date_range_days); setUploadBrand(run.brand ?? ''); setUploadIsBulk(run.is_bulk_run ?? false); setUploadPortfolios([]); setSelectedPortfolios([]); setView('analysis') } }}>
                       ⚙️ Re-open analysis
                     </button>
                     <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px' }}

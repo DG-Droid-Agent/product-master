@@ -37,7 +37,7 @@ function isBulkFile(buffer: Buffer): boolean {
   } catch { return false }
 }
 
-function parseBulkFile(buffer: Buffer): { rows: any[]; portfolios: string[] } {
+function parseBulkFile(buffer: Buffer): { rows: any[]; portfolios: string[]; portfolioSummary: any[] } {
   const wb  = XLSX.read(buffer, { type: 'buffer' })
   const ws  = wb.Sheets['SP Search Term Report']
   const raw = XLSX.utils.sheet_to_json(ws, { defval: '' }) as any[]
@@ -85,7 +85,21 @@ function parseBulkFile(buffer: Buffer): { rows: any[]; portfolios: string[] } {
   }
 
   const portfolios = [...new Set(rows.map(r => r.portfolio))].filter(p => p !== 'Unassigned').sort()
-  return { rows, portfolios }
+
+  // Build portfolio spend summary for the selector UI
+  const portfolioStats: Record<string, { spend: number; rows: number; campaigns: Set<string> }> = {}
+  for (const r of rows) {
+    if (!r.portfolio || r.portfolio === 'Unassigned') continue
+    if (!portfolioStats[r.portfolio]) portfolioStats[r.portfolio] = { spend: 0, rows: 0, campaigns: new Set() }
+    portfolioStats[r.portfolio].spend += r.cost
+    portfolioStats[r.portfolio].rows  += 1
+    portfolioStats[r.portfolio].campaigns.add(r.campaign_name)
+  }
+  const portfolioSummary = Object.entries(portfolioStats)
+    .map(([name, s]) => ({ name, spend: Math.round(s.spend * 100) / 100, rows: s.rows, campaigns: s.campaigns.size }))
+    .sort((a, b) => b.spend - a.spend)
+
+  return { rows, portfolios, portfolioSummary }
 }
 
 function parseIndividualFile(buffer: Buffer): any[] {
@@ -127,7 +141,7 @@ export async function POST(request: NextRequest) {
 
       if (bulk) {
         // ── BULK FILE ─────────────────────────────────────────────────────
-        const { rows, portfolios } = parseBulkFile(buffer)
+        const { rows, portfolios, portfolioSummary } = parseBulkFile(buffer)
         if (!rows.length) {
           return NextResponse.json({ error: `No valid rows in bulk file: ${file.name}` }, { status: 400 })
         }
@@ -172,7 +186,7 @@ export async function POST(request: NextRequest) {
           if (error) throw error
         }
 
-        uploadResults.push({ upload_id: upload.id, campaign_name: bulkCampaignName, row_count: rows.length, is_bulk: true, portfolios })
+        uploadResults.push({ upload_id: upload.id, campaign_name: bulkCampaignName, row_count: rows.length, is_bulk: true, portfolios, portfolio_summary: portfolioSummary })
 
       } else {
         // ── INDIVIDUAL FILE ───────────────────────────────────────────────

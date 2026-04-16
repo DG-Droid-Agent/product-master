@@ -414,7 +414,7 @@ export async function POST(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { upload_ids, date_range_days, org_id, brand, run_name, force } = await request.json()
+    const { upload_ids, date_range_days, org_id, brand, run_name, force, selected_portfolios } = await request.json()
     if (!upload_ids?.length || !date_range_days || !org_id) {
       return NextResponse.json({ error: 'Missing: upload_ids, date_range_days, org_id' }, { status: 400 })
     }
@@ -445,7 +445,13 @@ export async function POST(request: NextRequest) {
     if (!termRows?.length) return NextResponse.json({ error: 'No data found for these uploads' }, { status: 404 })
 
     const isBulk = (uploadMeta ?? []).some((u: any) => u.is_bulk_file)
-    const existingKeywords = [...new Set(termRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
+
+    // Filter to selected portfolios if provided — reduces engine work significantly
+    const filteredRows = (isBulk && selected_portfolios?.length)
+      ? termRows.filter((r: any) => selected_portfolios.includes(r.portfolio))
+      : termRows
+
+    const existingKeywords = [...new Set(filteredRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
 
     // [A5] Build auto run name
     const asins        = [...new Set((uploadMeta ?? []).map((u: any) => u.asin).filter(Boolean))]
@@ -497,7 +503,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const results = await runAnalysis(termRows as SearchTermRow[], date_range_days, existingKeywords, isBulk)
+    const results = await runAnalysis(filteredRows as SearchTermRow[], date_range_days, existingKeywords, isBulk)
 
     let runData: any
     if (duplicate) {
