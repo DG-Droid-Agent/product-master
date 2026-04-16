@@ -1512,6 +1512,15 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
 
   const handleGoDecisions = (runId: string) => { setDecisionsRunId(runId); setView('decisions') }
 
+  const handleSelectMore = async () => {
+    if (uploadPortfolioSummary.length === 0 && uploadIds.length > 0) {
+      const sb = createClient()
+      const { data } = await sb.from('ppc_uploads').select('portfolio_summary').eq('id', uploadIds[0]).single()
+      if (data?.portfolio_summary?.length) setUploadPortfolioSummary(data.portfolio_summary)
+    }
+    setView('portfolio_select')
+  }
+
   if (!orgId && !loading) return <div style={{ padding: 32, color: 'var(--text3)' }}>No organisation found.</div>
 
   if (view === 'upload')    return <UploadView brands={brands} orgId={orgId!} onDone={handleUploadDone} />
@@ -1531,14 +1540,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
     orgId={orgId!} isBulk={uploadIsBulk}
     portfolios={selectedPortfolios.length > 0 ? selectedPortfolios : ['']}
     onBack={() => setView('home')}
-    onSelectMore={async () => {
-      if (uploadPortfolioSummary.length === 0 && uploadIds.length > 0) {
-        const sb = createClient()
-        const { data } = await sb.from('ppc_uploads').select('portfolio_summary').eq('id', uploadIds[0]).single()
-        if (data?.portfolio_summary?.length) setUploadPortfolioSummary(data.portfolio_summary)
-      }
-      setView('portfolio_select')
-    }}
+    onSelectMore={handleSelectMore}
     onGoDecisions={handleGoDecisions}
   />
   if (view === 'decisions') return <DecisionsView orgId={orgId!} brands={brands} initialRunId={decisionsRunId} onBack={() => setView('home')} />
