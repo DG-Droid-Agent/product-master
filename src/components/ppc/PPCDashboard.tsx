@@ -325,13 +325,41 @@ function NGramTable({ rows, label }: { rows: any[]; label: string }) {
 // ── PORTFOLIO SELECTOR VIEW ───────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm, onBack }: {
+function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm, onBack, uploadIds, orgId }: {
   portfolioSummary: any[]
   selected: string[]
   onSelect: (v: string[]) => void
   onConfirm: () => void
   onBack: () => void
+  uploadIds: string[]
+  orgId: string
 }) {
+  const supabase = createClient()
+  const [analysedPortfolios, setAnalysedPortfolios] = useState<string[]>([])
+
+  useEffect(() => {
+    // Fetch which portfolios have already been analysed for this upload
+    const load = async () => {
+      const { data } = await supabase
+        .from('ppc_decisions_log')
+        .select('portfolio')
+        .eq('org_id', orgId)
+        .not('portfolio', 'is', null)
+      // Also check analysis runs
+      const { data: runs } = await supabase
+        .from('ppc_analysis_runs')
+        .select('portfolio')
+        .eq('org_id', orgId)
+        .not('portfolio', 'is', null)
+        .not('results_json', 'is', null)
+      const done = new Set([
+        ...(data ?? []).map((r: any) => r.portfolio),
+        ...(runs ?? []).map((r: any) => r.portfolio),
+      ].filter(Boolean))
+      setAnalysedPortfolios([...done])
+    }
+    load()
+  }, [])
   const toggle = (name: string) => onSelect(
     selected.includes(name) ? selected.filter(p => p !== name) : [...selected, name]
   )
@@ -384,16 +412,22 @@ function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm
           const isSelected = selected.includes(p.name)
           const pct = totalSpend > 0 ? (p.spend / totalSpend * 100) : 0
           return (
+            {(() => {
+              const isDone = analysedPortfolios.includes(p.name)
+              return (
             <div key={p.name} onClick={() => toggle(p.name)} style={{
               display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', cursor: 'pointer',
-              background: isSelected ? 'var(--accent-light)' : 'var(--surface)',
+              background: isSelected ? 'var(--accent-light)' : isDone ? 'rgba(22,101,52,.04)' : 'var(--surface)',
               borderBottom: i < portfolioSummary.length - 1 ? '1px solid var(--border)' : 'none',
             }}>
               <input type="checkbox" checked={isSelected} onChange={() => toggle(p.name)}
                 onClick={e => e.stopPropagation()}
                 style={{ width: 15, height: 15, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: isSelected ? 600 : 400, marginBottom: 3 }}>{p.name}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                  <span style={{ fontSize: 13, fontWeight: isSelected ? 600 : 400 }}>{p.name}</span>
+                  {isDone && <span style={{ fontSize: 10, color: '#166534', background: 'rgba(22,101,52,.1)', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>✓ Done</span>}
+                </div>
                 {/* Spend bar */}
                 <div style={{ background: 'var(--surface2)', borderRadius: 3, height: 4, overflow: 'hidden' }}>
                   <div style={{ width: `${pct}%`, height: '100%', background: isSelected ? 'var(--accent)' : 'var(--border)', borderRadius: 3 }} />
@@ -416,7 +450,7 @@ function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm
         </div>
         <button className="btn-primary" onClick={onConfirm} disabled={selected.length === 0}
           style={{ opacity: selected.length === 0 ? 0.5 : 1 }}>
-          Analyse {selected.length} portfolio{selected.length !== 1 ? 's' : ''} →
+          Analyse {selected.length === 1 ? selected[0] : `${selected.length} portfolios`} →
         </button>
       </div>
     </div>
@@ -606,10 +640,10 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
 // ── ANALYSIS VIEW (Option A: sidebar + main panel) ────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfolios: initialPortfolios, selectedPortfolios, onBack, onGoDecisions }: {
+function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfolios: initialPortfolios, selectedPortfolios, onBack, onSelectMore, onGoDecisions }: {
   uploadIds: string[]; dateRangeDays: number; brand: string; orgId: string
   isBulk: boolean; portfolios: string[]; selectedPortfolios: string[]
-  onBack: () => void; onGoDecisions: (runId: string) => void
+  onBack: () => void; onSelectMore: () => void; onGoDecisions: (runId: string) => void
 }) {
   const supabase = createClient()
   const [loading, setLoading]         = useState(true)
@@ -919,6 +953,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
             )}
             <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => runId && onGoDecisions(runId)}>View decisions log</button>
             <button className="btn-secondary" style={{ fontSize: 12 }} onClick={onBack}>＋ New upload</button>
+              {isBulk && <button className="btn-secondary" style={{ fontSize: 12 }} onClick={onSelectMore}>◀ Analyse another portfolio</button>}
           </div>
         </div>
 
@@ -1389,9 +1424,11 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
       onSelect={setSelectedPortfolios}
       onConfirm={() => setView('analysis')}
       onBack={() => setView('upload')}
+      uploadIds={uploadIds}
+      orgId={orgId!}
     />
   )
-  if (view === 'analysis')  return <AnalysisView uploadIds={uploadIds} dateRangeDays={uploadDays} brand={uploadBrand} orgId={orgId!} isBulk={uploadIsBulk} portfolios={uploadPortfolios} selectedPortfolios={selectedPortfolios} onBack={() => setView('home')} onGoDecisions={handleGoDecisions} />
+  if (view === 'analysis')  return <AnalysisView uploadIds={uploadIds} dateRangeDays={uploadDays} brand={uploadBrand} orgId={orgId!} isBulk={uploadIsBulk} portfolios={uploadPortfolios} selectedPortfolios={selectedPortfolios} onBack={() => setView('home')} onSelectMore={() => setView('portfolio_select')} onGoDecisions={handleGoDecisions} />
   if (view === 'decisions') return <DecisionsView orgId={orgId!} brands={brands} initialRunId={decisionsRunId} onBack={() => setView('home')} />
 
   // ── HOME ──────────────────────────────────────────────────────────────────

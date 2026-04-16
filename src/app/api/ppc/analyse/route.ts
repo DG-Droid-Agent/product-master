@@ -519,6 +519,7 @@ export async function POST(request: NextRequest) {
           run_name: run_name ?? autoRunName ?? `Analysis ${new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' })}`,
           upload_ids, date_range_days,
           is_bulk_run: isBulk,
+          portfolio: (selected_portfolios?.length === 1) ? selected_portfolios[0] : null,
           portfolio_roas:    summary.overall_roas,
           total_spend:       summary.total_spend,
           total_wasted:      summary.total_wasted,
