@@ -1545,7 +1545,21 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
   />
   if (view === 'decisions') return <DecisionsView orgId={orgId!} brands={brands} initialRunId={decisionsRunId} onBack={() => setView('home')} />
 
-  // ── HOME ──────────────────────────────────────────────────────────────────
+  // ── HOME — pre-compute upload groups before return ────────────────────────
+  const bulkUploads  = recentUploads.filter((u: any) => u.is_bulk_file)
+  const indivUploads = recentUploads.filter((u: any) => !u.is_bulk_file)
+  const indivGroups: Record<string, any[]> = {}
+  for (const u of indivUploads) {
+    const day = new Date(u.uploaded_at).toLocaleDateString('en-GB')
+    const key = (u.brand ?? 'Unknown') + '_' + day
+    if (!indivGroups[key]) indivGroups[key] = []
+    indivGroups[key].push(u)
+  }
+  const homeItems: { type: string; upload: any; group: any[] | null }[] = [
+    ...bulkUploads.map((u: any) => ({ type: 'bulk', upload: u, group: null })),
+    ...Object.entries(indivGroups).map(([, uploads]) => ({ type: 'group', upload: uploads[0], group: uploads })),
+  ]
+
   return (
     <div style={{ padding: 24, maxWidth: 920 }}>
 
@@ -1571,26 +1585,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
           ? <div className="empty" style={{ height: 160 }}><div className="ei">📂</div><div>No uploads yet — upload a bulk file or individual campaign CSVs to get started</div></div>
           : (
             <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
-              {(() => {
-                // Group individual uploads: same brand + same day = one group
-                const bulkUploads = recentUploads.filter(u => u.is_bulk_file)
-                const indivUploads = recentUploads.filter(u => !u.is_bulk_file)
-                
-                // Group individual by brand + upload date
-                const indivGroups: Record<string, typeof indivUploads> = {}
-                for (const u of indivUploads) {
-                  const day = new Date(u.uploaded_at).toLocaleDateString('en-GB')
-                  const key = `${u.brand ?? 'Unknown'}_${day}`
-                  if (!indivGroups[key]) indivGroups[key] = []
-                  indivGroups[key].push(u)
-                }
-
-                const allItems = [
-                  ...bulkUploads.map(u => ({ type: 'bulk' as const, upload: u, group: null })),
-                  ...Object.entries(indivGroups).map(([key, uploads]) => ({ type: 'group' as const, upload: uploads[0], group: uploads })),
-                ]
-
-                return allItems.map(item => {
+              {homeItems.map(item => {
                 const upload = item.upload
                 const groupUploads = item.group ?? [upload]
                 const allGroupIds = groupUploads.map(u => u.id)
@@ -1680,7 +1675,6 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
               })}
             </div>
           )
-        })()
       }
     </div>
   )
