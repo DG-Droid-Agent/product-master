@@ -360,8 +360,9 @@ function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm
     }
     load()
   }, [])
-  // Single select — clicking a portfolio selects only that one
-  const toggle = (name: string) => onSelect(selected.includes(name) ? [] : [name])
+  const toggle = (name: string) => onSelect(
+    selected.includes(name) ? selected.filter(p => p !== name) : [...selected, name]
+  )
   const selectAll  = () => onSelect(portfolioSummary.map(p => p.name))
   const selectTop  = (n: number) => onSelect(portfolioSummary.slice(0, n).map(p => p.name))
   const clearAll   = () => onSelect([])
@@ -446,7 +447,7 @@ function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm
         </div>
         <button className="btn-primary" onClick={onConfirm} disabled={selected.length === 0}
           style={{ opacity: selected.length === 0 ? 0.5 : 1 }}>
-          Analyse {selected[0]} →
+          Analyse {selected.length === 1 ? selected[0] : `${selected.length} portfolios`} →
         </button>
       </div>
     </div>
@@ -646,9 +647,9 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
 // ── ANALYSIS VIEW (Option A: sidebar + main panel) ────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfolio, onBack, onSelectMore, onGoDecisions }: {
+function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfolios: selectedPortfoliosIn, onBack, onSelectMore, onGoDecisions }: {
   uploadIds: string[]; dateRangeDays: number; brand: string; orgId: string
-  isBulk: boolean; portfolio: string
+  isBulk: boolean; portfolios: string[]
   onBack: () => void; onSelectMore: () => void; onGoDecisions: (runId: string) => void
 }) {
   const supabase = createClient()
@@ -660,8 +661,11 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const [results, setResults]         = useState<any>(null)
   const [runId, setRunId]             = useState<string | null>(null)
   const [loadError, setLoadError]     = useState('')
+  const portfolio = selectedPortfoliosIn[0] ?? ''
   const [activePortfolio, setActivePortfolio] = useState<string>(portfolio)
+  const [pendingPortfolios, setPendingPortfolios] = useState<string[]>(selectedPortfoliosIn.slice(1))
   const [allPortfolioRuns, setAllPortfolioRuns] = useState<any[]>([])
+  const portfolioCache = useRef<Map<string, any>>(new Map())
   const [activeTab, setActiveTab]     = useState<Tab>('kw_neg')
   const [selected, setSelected]       = useState<Set<string>>(new Set())
   const [decisionMap, setDecisionMap] = useState<Map<string, any>>(new Map())
@@ -675,6 +679,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const runAnalysis = useCallback(async (force = false) => {
     // Guard: if no portfolio selected, redirect to selector
     if (isBulk && !portfolio) { onSelectMore(); return }
+    // portfolio is derived from selectedPortfoliosIn[0] above
     setLoading(true); setLoadError(''); setProgress(0)
 
     // Simulate progress steps while waiting for the API
@@ -717,12 +722,23 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
       setFromCache(json.from_cache ?? false)
       setAnalysedAt(json.analysed_at ?? null)
       setActivePortfolio(json.portfolio ?? portfolio)
+      // Cache this result for instant switching later
+      portfolioCache.current.set(json.portfolio ?? portfolio, {
+        results: json.results, runId: json.analysis_run_id, analysedAt: json.analysed_at
+      })
 
       // Load all portfolio runs for this upload to build sidebar
       if (isBulk && uploadIds[0]) {
         const runsRes = await fetch(`/api/ppc/analyse?upload_id=${uploadIds[0]}&org_id=${orgId}`)
         const runsJson = await runsRes.json()
         if (runsJson.portfolio_runs) setAllPortfolioRuns(runsJson.portfolio_runs)
+      }
+
+      // If more portfolios were selected, automatically load the next one
+      if (pendingPortfolios.length > 0) {
+        const next = pendingPortfolios[0]
+        setPendingPortfolios(p => p.slice(1))
+        setTimeout(() => loadPortfolio(next), 500)
       }
 
         // [A4] Pre-populate decision map from existing decisions
@@ -889,14 +905,31 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     ngrams:     0,
   }
 
-  const loadPortfolio = async (portfolioName: string) => {
-    if (activePortfolio === portfolioName) return
+  const loadPortfolio = async (portfolioName: string, forceRefresh = false) => {
+    if (activePortfolio === portfolioName && !forceRefresh) return
+    
+    // Check local cache first — instant switch, no API call
+    if (!forceRefresh && portfolioCache.current.has(portfolioName)) {
+      const cached = portfolioCache.current.get(portfolioName)
+      setResults(cached.results); setRunId(cached.runId)
+      setFromCache(true); setAnalysedAt(cached.analysedAt)
+      setActivePortfolio(portfolioName); setActiveTab('kw_neg')
+      setSelected(new Set()); setDecisionMap(new Map())
+      return
+    }
+
     setLoading(true); setLoadError('')
     try {
       const res  = await fetch('/api/ppc/analyse', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force: false, portfolio: portfolioName }) })
+        body: JSON.stringify({ upload_ids: uploadIds, date_range_days: dateRangeDays, org_id: orgId, brand, force: forceRefresh, portfolio: portfolioName }) })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
+      
+      // Store in local cache for instant future switching
+      portfolioCache.current.set(portfolioName, {
+        results: json.results, runId: json.analysis_run_id, analysedAt: json.analysed_at
+      })
+
       setResults(json.results); setRunId(json.analysis_run_id)
       setFromCache(json.from_cache ?? true); setAnalysedAt(json.analysed_at ?? null)
       setActivePortfolio(portfolioName); setActiveTab('kw_neg')
@@ -988,7 +1021,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
               </span>
             )}
             {fromCache && (
-              <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => runAnalysis(true)} title="Re-run the analysis engine with latest data">
+              <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => loadPortfolio(activePortfolio, true)} title="Re-run the analysis engine with latest data">
                 🔄 Refresh analysis
               </button>
             )}
@@ -1472,7 +1505,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
   if (view === 'analysis')  return <AnalysisView
     uploadIds={uploadIds} dateRangeDays={uploadDays} brand={uploadBrand}
     orgId={orgId!} isBulk={uploadIsBulk}
-    portfolio={selectedPortfolios[0] ?? ''}
+    portfolios={selectedPortfolios.length > 0 ? selectedPortfolios : ['']}
     onBack={() => setView('home')}
     onSelectMore={async () => {
       if (uploadPortfolioSummary.length === 0 && uploadIds.length > 0) {
@@ -1567,8 +1600,21 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                             .select('portfolio_summary')
                             .eq('id', run.upload_ids[0])
                             .single()
-                          setUploadPortfolioSummary(data?.portfolio_summary ?? [])
-                          setSelectedPortfolios([])
+                          const summary = data?.portfolio_summary ?? []
+                          setUploadPortfolioSummary(summary)
+                          // Pre-tick portfolios that have already been analysed
+                          const { data: runs } = await sb.from('ppc_analysis_runs')
+                            .select('portfolio')
+                            .eq('org_id', orgId!)
+                            .eq('is_bulk_run', true)
+                            .not('portfolio', 'is', null)
+                            .not('results_json', 'is', null)
+                          const donePorts = (runs ?? []).map((r: any) => r.portfolio).filter(Boolean)
+                          // Pre-select: already analysed portfolios, or top by spend if none done
+                          const preSelected = donePorts.length > 0
+                            ? summary.filter((p: any) => donePorts.includes(p.name)).map((p: any) => p.name)
+                            : summary.filter((p: any) => p.spend >= 50).map((p: any) => p.name)
+                          setSelectedPortfolios(preSelected)
                           setView('portfolio_select')
                         } else {
                           // Individual: use the run's portfolio name directly
