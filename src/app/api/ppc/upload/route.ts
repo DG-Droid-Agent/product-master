@@ -148,16 +148,22 @@ export async function POST(request: NextRequest) {
 
         const bulkCampaignName = `BULK:${file.name}`
 
-        // [U3] duplicate check
-        if (reportStartDate && reportEndDate) {
-          const { data: existing } = await supabase
-            .from('ppc_uploads').select('id')
-            .eq('org_id', orgId).eq('campaign_name', bulkCampaignName)
-            .eq('report_start_date', reportStartDate).eq('report_end_date', reportEndDate)
-            .maybeSingle()
-          if (existing) {
-            return NextResponse.json({ error: 'Duplicate: this bulk file for this date range was already uploaded.', duplicate: true, campaign_name: bulkCampaignName }, { status: 409 })
-          }
+        // [U3] Bulk duplicate check — always by filename, never allow same file twice
+        // Do NOT gate on dates — bulk files don't require dates to be entered
+        const { data: existingBulk } = await supabase
+          .from('ppc_uploads').select('id, uploaded_at')
+          .eq('org_id', orgId)
+          .eq('campaign_name', bulkCampaignName)
+          .order('uploaded_at', { ascending: false })
+          .limit(1)
+        if (existingBulk?.length) {
+          const uploadedDate = new Date(existingBulk[0].uploaded_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+          return NextResponse.json({
+            error: `This bulk file was already uploaded on ${uploadedDate}. Delete the existing upload in Supabase first if you want to re-upload.`,
+            duplicate: true,
+            campaign_name: bulkCampaignName,
+            existing_upload_id: existingBulk[0].id,
+          }, { status: 409 })
         }
 
         const { data: upload, error: uploadError } = await supabase
