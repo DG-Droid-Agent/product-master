@@ -1449,7 +1449,8 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
   const [view, setView]         = useState<View>('home')
   const [orgId, setOrgId]       = useState<string | null>(null)
   const [brands, setBrands]     = useState<string[]>([])
-  const [recentRuns, setRecentRuns]   = useState<any[]>([])
+  const [recentRuns, setRecentRuns]       = useState<any[]>([])
+  const [recentUploads, setRecentUploads] = useState<any[]>([])
   const [pendingCount, setPendingCount] = useState(0)
   const [loading, setLoading]   = useState(true)
   const [uploadIds, setUploadIds]         = useState<string[]>([])
@@ -1466,15 +1467,19 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
       const { data: org } = await supabase.from('orgs').select('id').limit(1).single()  // [D12]
       if (!org?.id) return
       setOrgId(org.id)
-      const [{ data: bData }, { data: runs }, { count }] = await Promise.all([
+      const [{ data: bData }, { data: runs }, { count }, { data: uploads }] = await Promise.all([
         supabase.from('products').select('brand'),                                        // [D12]
         supabase.from('ppc_analysis_runs')
-          .select('id,run_name,run_at,brand,asin,report_start_date,report_end_date,date_range_days,total_spend,total_wasted,high_negatives,harvest_candidates,upload_ids,is_bulk_run')
-          .eq('org_id', org.id).order('run_at', { ascending: false }).limit(20),
+          .select('id,run_name,run_at,brand,asin,report_start_date,report_end_date,date_range_days,total_spend,total_wasted,high_negatives,harvest_candidates,upload_ids,is_bulk_run,portfolio')
+          .eq('org_id', org.id).order('run_at', { ascending: false }).limit(50),
         supabase.from('ppc_decisions_log').select('*', { count: 'exact', head: true }).eq('org_id', org.id).eq('status', 'pending'),
+        supabase.from('ppc_uploads')
+          .select('id,filename,uploaded_at,row_count,is_bulk_file,brand,portfolios,portfolio_summary')
+          .eq('org_id', org.id).order('uploaded_at', { ascending: false }).limit(20),
       ])
       if (bData) setBrands([...new Set(bData.map((r: any) => r.brand).filter(Boolean))].sort() as string[])
       setRecentRuns(runs ?? [])
+      setRecentUploads(uploads ?? [])
       setPendingCount(count ?? 0)
       setLoading(false)
     }
@@ -1516,7 +1521,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
       selected={selectedPortfolios}
       onSelect={setSelectedPortfolios}
       onConfirm={() => setView('analysis')}
-      onBack={() => setView('upload')}
+      onBack={() => setView('home')}
       uploadIds={uploadIds}
       orgId={orgId!}
     />
@@ -1540,124 +1545,113 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
 
   // ── HOME ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: 24, maxWidth: 900 }}>
+    <div style={{ padding: 24, maxWidth: 920 }}>
+
+      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>PPC — Negative targeting &amp; keyword harvesting</div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>Upload individual campaign files or the Amazon bulk download · Analysis runs per portfolio automatically</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>Select an upload to view its dashboard · Upload a new file to add data</div>
         </div>
-        <button className="btn-primary" onClick={() => setView('upload')}>＋ New analysis</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-secondary" onClick={() => setView('decisions')}>
+            {pendingCount > 0 && <span style={{ marginRight: 6, background: '#dc2626', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{pendingCount}</span>}
+            📋 Decisions log
+          </button>
+          <button className="btn-primary" onClick={() => setView('upload')}>＋ Upload new file</button>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 28 }}>
-        {[
-          { icon: '📂', title: 'Upload & analyse', desc: 'Individual campaigns or full account bulk download', action: () => setView('upload') },
-          { icon: '📋', title: 'Decisions log',    desc: `Track what was actioned${pendingCount > 0 ? ` · ${pendingCount} pending` : ''}`, action: () => setView('decisions'), hi: pendingCount > 0 },
-          { icon: '⏳', title: 'Pending decisions', desc: pendingCount > 0 ? `${pendingCount} decisions awaiting action in Amazon` : 'All decisions actioned', action: () => setView('decisions'), hi: pendingCount > 0 },
-        ].map(card => (
-          <div key={card.title} onClick={card.action} style={{ background: (card as any).hi ? 'rgba(234,164,44,.08)' : 'var(--surface)', border: `1px solid ${(card as any).hi ? 'rgba(234,164,44,.35)' : 'var(--border)'}`, borderRadius: 8, padding: 16, cursor: 'pointer' }}>
-            <div style={{ fontSize: 22, marginBottom: 8 }}>{card.icon}</div>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{card.title}</div>
-            <div style={{ fontSize: 11, color: (card as any).hi ? '#b45309' : 'var(--text3)' }}>{card.desc}</div>
-          </div>
-        ))}
-      </div>
+      {/* Uploads — top level navigation */}
+      {loading
+        ? <div className="loading">⟳ Loading…</div>
+        : recentUploads.length === 0
+          ? <div className="empty" style={{ height: 160 }}><div className="ei">📂</div><div>No uploads yet — upload a bulk file or individual campaign CSVs to get started</div></div>
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 8 }}>
+              {recentUploads.map(upload => {
+                const uploadRuns = recentRuns.filter(r => (r.upload_ids ?? []).includes(upload.id))
+                const donePorts  = uploadRuns.filter(r => r.portfolio).map(r => r.portfolio)
+                const totalPorts = upload.portfolios?.length ?? 0
+                const isBulk     = upload.is_bulk_file
 
-      <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '.07em', color: 'var(--text3)', marginBottom: 10 }}>Recent analysis runs</div>
-      {loading ? <div className="loading">⟳ Loading…</div>
-       : recentRuns.length === 0 ? <div className="empty" style={{ height: 120 }}><div className="ei">🎯</div><div>No analysis runs yet</div></div>
-       : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {/* [D8] Deduplicate by upload_ids fingerprint */}
-          {(() => {
-            const seen = new Set<string>()
-            const deduped = recentRuns.filter(run => {
-              const key = [...(run.upload_ids ?? [])].sort().join(',')
-              if (seen.has(key)) return false
-              seen.add(key); return true
-            })
-            return deduped.map(run => {
-              const dupeCount = recentRuns.filter(r => [...(r.upload_ids??[])].sort().join(',') === [...(run.upload_ids??[])].sort().join(',')).length  // [D9]
-              return (
-                <div key={run.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      {run.brand && <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>{run.brand}</span>}
-                      {run.asin  && <span style={{ fontSize: 12, fontFamily: 'var(--mono)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{run.asin}</span>}
-                      {run.is_bulk_run && <Badge color="#7c3aed" bg="rgba(124,58,237,.08)">Bulk</Badge>}
-                      {(run.report_start_date || run.report_end_date) && (
-                        <span style={{ fontSize: 12, fontWeight: 600 }}>
-                          {run.report_start_date ? new Date(run.report_start_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                          {run.report_start_date && run.report_end_date ? ' – ' : ''}
-                          {run.report_end_date   ? new Date(run.report_end_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                        </span>
-                      )}
-                      {!run.report_start_date && !run.report_end_date && <span style={{ fontSize: 12, fontWeight: 600 }}>{run.date_range_days}-day report</span>}
-                      {dupeCount > 1 && <span style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>run {dupeCount}×</span>}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', gap: 12, flexWrap: 'wrap' as const }}>
-                      <span>${run.total_spend?.toFixed(2)} spend</span>
-                      <span style={{ color: 'var(--red)', fontWeight: 600 }}>${run.total_wasted?.toFixed(2)} wasted</span>
-                      <span style={{ color: '#dc2626' }}>{run.high_negatives} HIGH</span>
-                      <span style={{ color: 'var(--accent)' }}>{run.harvest_candidates} harvest</span>
-                      <span>Analysed {new Date(run.run_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, flexShrink: 0, marginLeft: 16 }}>
-                    <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px' }}
-                      onClick={async () => {
-                        if (!run.upload_ids?.length) return
-                        setUploadIds(run.upload_ids)
-                        setUploadDays(run.date_range_days)
-                        setUploadBrand(run.brand ?? '')
-                        setUploadIsBulk(run.is_bulk_run ?? false)
-                        setUploadPortfolios([])
-                        if (run.is_bulk_run) {
-                          // Bulk: fetch portfolio summary then go to selector
-                          const sb = createClient()
-                          const { data } = await sb.from('ppc_uploads')
-                            .select('portfolio_summary')
-                            .eq('id', run.upload_ids[0])
-                            .single()
-                          const summary = data?.portfolio_summary ?? []
-                          setUploadPortfolioSummary(summary)
-                          // Check which portfolios are already analysed
-                          const { data: runs } = await sb.from('ppc_analysis_runs')
-                            .select('portfolio')
-                            .eq('org_id', orgId!)
-                            .eq('is_bulk_run', true)
-                            .not('portfolio', 'is', null)
-                            .not('results_json', 'is', null)
-                          const donePorts = (runs ?? []).map((r: any) => r.portfolio).filter(Boolean)
-                          if (donePorts.length > 0) {
-                            // Already have analyses — go straight to dashboard showing first done portfolio
-                            setSelectedPortfolios([donePorts[0]])
-                            setView('analysis')
-                          } else {
-                            // No analyses yet — show selector pre-ticked with top spend portfolios
-                            const preSelected = summary.filter((p: any) => p.spend >= 50).map((p: any) => p.name)
-                            setSelectedPortfolios(preSelected.length > 0 ? preSelected : summary.slice(0, 5).map((p: any) => p.name))
-                            setView('portfolio_select')
+                return (
+                  <div key={upload.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+
+                    {/* Upload header */}
+                    <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div style={{ fontSize: 20 }}>{isBulk ? '📦' : '📄'}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                          {upload.brand && <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>{upload.brand}</span>}
+                          {isBulk
+                            ? <Badge color="#7c3aed" bg="rgba(124,58,237,.08)">Bulk · {totalPorts} portfolios</Badge>
+                            : <span style={{ fontSize: 12, fontWeight: 600 }}>{upload.filename?.replace(/\.(csv|xlsx)$/i, '')}</span>
                           }
-                        } else {
-                          // Individual: use the run's portfolio name directly
-                          setSelectedPortfolios(run.portfolio ? [run.portfolio] : [''])
-                          setView('analysis')
-                        }
-                      }}>
-                      ⚙️ Re-open analysis
-                    </button>
-                    <button className="btn-secondary" style={{ fontSize: 11, padding: '5px 12px' }}
-                      onClick={() => { setDecisionsRunId(run.id); setView('decisions') }}>
-                      📋 View decisions
-                    </button>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', gap: 10 }}>
+                          <span>{(upload.row_count ?? 0).toLocaleString()} rows</span>
+                          <span>Uploaded {new Date(upload.uploaded_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                          {isBulk && donePorts.length > 0 && <span style={{ color: '#166534', fontWeight: 600 }}>✓ {donePorts.length}/{totalPorts} portfolios analysed</span>}
+                          {isBulk && donePorts.length === 0 && <span>No portfolios analysed yet</span>}
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                        {isBulk && donePorts.length > 0 && (
+                          <button className="btn-primary" style={{ fontSize: 12 }} onClick={() => {
+                            setUploadIds([upload.id]); setUploadDays(65); setUploadBrand(upload.brand ?? '')
+                            setUploadIsBulk(true); setUploadPortfolioSummary(upload.portfolio_summary ?? [])
+                            setSelectedPortfolios([donePorts[0]]); setView('analysis')
+                          }}>📊 Open dashboard</button>
+                        )}
+                        <button className="btn-secondary" style={{ fontSize: 12 }} onClick={() => {
+                          setUploadIds([upload.id]); setUploadDays(65); setUploadBrand(upload.brand ?? '')
+                          setUploadIsBulk(isBulk); setUploadPortfolioSummary(upload.portfolio_summary ?? [])
+                          if (isBulk) {
+                            const remaining = (upload.portfolio_summary ?? []).filter((p: any) => !donePorts.includes(p.name)).map((p: any) => p.name)
+                            setSelectedPortfolios(remaining.length > 0 ? remaining : [])
+                            setView('portfolio_select')
+                          } else {
+                            setSelectedPortfolios(uploadRuns[0]?.portfolio ? [uploadRuns[0].portfolio] : [''])
+                            setView('analysis')
+                          }
+                        }}>{isBulk ? '＋ Analyse portfolio' : uploadRuns.length > 0 ? '📊 View results' : '▶ Run analysis'}</button>
+                      </div>
+                    </div>
+
+                    {/* Portfolio pills */}
+                    {isBulk && donePorts.length > 0 && (
+                      <div style={{ borderTop: '1px solid var(--border)', padding: '8px 18px', display: 'flex', gap: 6, flexWrap: 'wrap' as const, background: 'var(--surface2)' }}>
+                        {donePorts.map(port => {
+                          const run    = uploadRuns.find(r => r.portfolio === port)
+                          const wPct   = (run?.total_spend ?? 0) > 0 ? (run?.total_wasted ?? 0) / run.total_spend : 0
+                          const hi     = run?.high_negatives ?? 0
+                          const health: Health = wPct > 0.30 || hi > 3 ? 'red' : wPct > 0.15 || hi > 0 ? 'amber' : 'green'
+                          return (
+                            <button key={port} style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, cursor: 'pointer', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text)' }}
+                              onClick={() => {
+                                setUploadIds([upload.id]); setUploadDays(65); setUploadBrand(upload.brand ?? '')
+                                setUploadIsBulk(true); setUploadPortfolioSummary(upload.portfolio_summary ?? [])
+                                setSelectedPortfolios([port]); setView('analysis')
+                              }}>
+                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: HEALTH_COLORS[health].dot, flexShrink: 0 }} />
+                              {port}
+                            </button>
+                          )
+                        })}
+                        {totalPorts > donePorts.length && (
+                          <span style={{ fontSize: 11, color: 'var(--text3)', alignSelf: 'center' }}>+{totalPorts - donePorts.length} not analysed</span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )
-            })
-          })()}
-        </div>
-      )}
+                )
+              })}
+            </div>
+          )
+      }
     </div>
   )
 }
