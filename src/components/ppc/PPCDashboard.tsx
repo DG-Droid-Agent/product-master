@@ -410,11 +410,9 @@ function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 20 }}>
         {portfolioSummary.map((p, i) => {
           const isSelected = selected.includes(p.name)
-          const pct = totalSpend > 0 ? (p.spend / totalSpend * 100) : 0
+          const isDone     = analysedPortfolios.includes(p.name)
+          const pct        = totalSpend > 0 ? (p.spend / totalSpend * 100) : 0
           return (
-            {(() => {
-              const isDone = analysedPortfolios.includes(p.name)
-              return (
             <div key={p.name} onClick={() => toggle(p.name)} style={{
               display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', cursor: 'pointer',
               background: isSelected ? 'var(--accent-light)' : isDone ? 'rgba(22,101,52,.04)' : 'var(--surface)',
@@ -428,7 +426,6 @@ function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm
                   <span style={{ fontSize: 13, fontWeight: isSelected ? 600 : 400 }}>{p.name}</span>
                   {isDone && <span style={{ fontSize: 10, color: '#166534', background: 'rgba(22,101,52,.1)', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>✓ Done</span>}
                 </div>
-                {/* Spend bar */}
                 <div style={{ background: 'var(--surface2)', borderRadius: 3, height: 4, overflow: 'hidden' }}>
                   <div style={{ width: `${pct}%`, height: '100%', background: isSelected ? 'var(--accent)' : 'var(--border)', borderRadius: 3 }} />
                 </div>
