@@ -505,7 +505,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const [prevDecs, setPrevDecs]       = useState<any[]>([])
   const [histExp, setHistExp]         = useState(false)
 
-  const runAnalysis = async (force = false) => {
+  const runAnalysis = useCallback(async (force = false) => {
     setLoading(true); setLoadError(''); setProgress(0)
 
     // Simulate progress steps while waiting for the API
@@ -590,7 +590,9 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     }
   }
 
-  useEffect(() => { runAnalysis(false) }, [])
+  }, [uploadIds, dateRangeDays, orgId, brand, isBulk])  // useCallback deps
+
+  useEffect(() => { runAnalysis(false) }, [runAnalysis])
 
   // [D2] toggle with auto-pre-select recommended campaigns
   const toggle = (key: string, recCampaigns?: string[]) => {
@@ -670,19 +672,6 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
     return results.portfolio_results?.[activePortfolio] ?? results.account
   }
 
-  const portData   = getActivePortfolioData()
-  const summary    = portData.summary ?? {}
-  const health     = results.portfolio_health ?? []
-  const isBulkRes  = results.is_bulk
-
-  const tabCounts: Record<Tab, number> = {
-    kw_neg:     (portData.phrase_high?.length ?? 0) + (portData.phrase_medium?.length ?? 0) + (portData.exact_negatives?.length ?? 0),
-    pt_neg:     portData.pt_negatives?.length ?? 0,
-    harvest_kw: portData.harvest_candidates?.length ?? 0,
-    harvest_pt: portData.pt_harvest?.length ?? 0,
-    ngrams:     0,
-  }
-
   if (loading) return (
     <div style={{ padding: 48, maxWidth: 480, margin: '0 auto' }}>
       <div style={{ textAlign: 'center' as const, marginBottom: 24 }}>
@@ -713,6 +702,19 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   )
 
   if (!results) return null
+
+  const portData   = getActivePortfolioData()
+  const summary    = portData.summary ?? {}
+  const health     = results.portfolio_health ?? []
+  const isBulkRes  = results.is_bulk
+
+  const tabCounts: Record<Tab, number> = {
+    kw_neg:     (portData.phrase_high?.length ?? 0) + (portData.phrase_medium?.length ?? 0) + (portData.exact_negatives?.length ?? 0),
+    pt_neg:     portData.pt_negatives?.length ?? 0,
+    harvest_kw: portData.harvest_candidates?.length ?? 0,
+    harvest_pt: portData.pt_harvest?.length ?? 0,
+    ngrams:     0,
+  }
 
   return (
     <div style={{ display: 'flex', height: '100%', minHeight: 0 }}>
