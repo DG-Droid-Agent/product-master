@@ -534,16 +534,42 @@ export async function POST(request: NextRequest) {
       .order('decided_at', { ascending: false })
 
     // ── SAVE RESULTS TO DB ───────────────────────────────────────────────────
-    // Store results_json so future opens are instant (no re-running the engine)
-    await supabase
+    // Trim n-gram tables before saving — UI only shows top 20/20/15 anyway
+    // Full tables are 14MB+; trimmed is ~285KB, well within Supabase 1MB limit
+    const trimNgrams = (r: any) => r ? {
+      ...r,
+      ngrams: {
+        uni: (r.ngrams?.uni ?? []).slice(0, 20),
+        bi:  (r.ngrams?.bi  ?? []).slice(0, 20),
+        tri: (r.ngrams?.tri ?? []).slice(0, 15),
+      }
+    } : r
+
+    const resultsToSave = results.is_bulk ? {
+      ...results,
+      account: trimNgrams(results.account),
+      portfolio_results: Object.fromEntries(
+        Object.entries(results.portfolio_results ?? {}).map(([k, v]) => [k, trimNgrams(v)])
+      ),
+    } : trimNgrams(results)
+
+    // Save results — failure here should not crash the response
+    const saveError = await supabase
       .from('ppc_analysis_runs')
-      .update({ results_json: results, analysed_at: new Date().toISOString() })
+      .update({ results_json: resultsToSave, analysed_at: new Date().toISOString() })
       .eq('id', runData.id)
+      .then(({ error }) => error?.message ?? null)
+
+    if (saveError) {
+      console.error('Failed to save results_json:', saveError)
+      // Continue — return results even if save failed, user can still see them
+    }
 
     return NextResponse.json({
       analysis_run_id:    runData.id,
       is_duplicate_run:   !!duplicate,   // [A3]
       from_cache:         false,
+      save_failed:        !!saveError,
       analysed_at:        new Date().toISOString(),
       existing_decisions: existingDecisions ?? [],  // [A4]
       results,
