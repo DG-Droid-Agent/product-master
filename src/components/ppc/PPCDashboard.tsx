@@ -1097,8 +1097,8 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                     ))}
                   </tr></thead>
                   <tbody>
-                    {camps.map(([name, v], i) => (
-                      <tr key={name} style={{ borderBottom: i < camps.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    {campTableRows.map(([name, v], i) => (
+                      <tr key={name} style={{ borderBottom: i < campTableRows.length - 1 ? '1px solid var(--border)' : 'none' }}>
                         <td style={{ padding: '7px 12px', fontWeight: 500, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{name}</td>
                         <td style={{ padding: '7px 12px', fontFamily: 'var(--mono)', color: v.wasted > 0 ? '#dc2626' : 'var(--text3)', fontWeight: v.wasted > 0 ? 700 : 400 }}>${v.wasted.toFixed(2)}</td>
                         <td style={{ padding: '7px 12px' }}>{v.high > 0 ? <span style={{ color: '#dc2626', fontWeight: 700 }}>{v.high} HIGH</span> : <span style={{ color: 'var(--text3)' }}>—</span>}</td>
