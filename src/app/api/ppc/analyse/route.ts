@@ -53,7 +53,24 @@ function buildNgramTable(rows: SearchTermRow[], n: number) {
 }
 
 function findCoreTerms(uni: any[]): Set<string> {
-  return new Set([...uni].sort((a, b) => b.total_cost - a.total_cost).slice(0, 15).filter(u => u.roas >= 2.0).map(u => u.ngram))
+  // Core terms = protected from being recommended as negatives
+  // Include top-spend unigrams with good aggregate ROAS
+  const bySpend = [...uni].sort((a, b) => b.total_cost - a.total_cost).slice(0, 15).filter(u => u.roas >= 2.0).map(u => u.ngram)
+  return new Set(bySpend)
+}
+
+function hasCorePerformance(ngram: string, rows: SearchTermRow[]): boolean {
+  // Check if this ngram converts well in ANY campaign with meaningful spend
+  // Protects words like 'fork', 'spoon' that are core product terms
+  // even if their aggregate ROAS is dragged down by many tiny long-tail zero-purchase queries
+  const campaigns = [...new Set(rows.map(r => r.campaign_name))]
+  for (const camp of campaigns) {
+    const cr = rows.filter(r => r.campaign_name === camp && r.search_term.toLowerCase().includes(ngram))
+    const cs = cr.reduce((s, r) => s + r.cost, 0)
+    const ss = cr.reduce((s, r) => s + r.sales, 0)
+    if (cs >= 5 && ss / cs >= 2.0) return true
+  }
+  return false
 }
 
 function classifyPriority(row: any, ngramSize: number): 'HIGH' | 'MEDIUM' | 'WATCH' | null {
@@ -145,25 +162,38 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
 
   const processNgram = (row: any, ngramSize: number) => {
     if (row.ngram.split(' ').every((w: string) => core.has(w))) return
+    // For unigrams: skip if this exact word performs well in any campaign
+    // This prevents core product words from being flagged as negatives
+    if (ngramSize === 1 && hasCorePerformance(row.ngram, rows)) return
     const pri = classifyPriority(row, ngramSize)
     if (!pri) return
-    const recCamps = campaigns.filter(c => {
+
+    // Per-campaign breakdown — correct spend/ROAS per specific campaign
+    const campBreakdown = campaigns.map(c => {
       const cr = rows.filter(r => r.campaign_name === c && r.search_term.toLowerCase().includes(row.ngram))
+      if (!cr.length) return null
       const cs = cr.reduce((s, r) => s + r.cost, 0)
       const ss = cr.reduce((s, r) => s + r.sales, 0)
-      return cs >= 10 && ss / cs < 1.0
-    })
-    const autoRows  = rows.filter(r => r.campaign_name.toLowerCase().includes('auto')  && r.search_term.toLowerCase().includes(row.ngram))
-    const broadRows = rows.filter(r => r.campaign_name.toLowerCase().includes('broad') && r.search_term.toLowerCase().includes(row.ngram))
-    const autoSpend  = autoRows.reduce((s, r) => s + r.cost, 0)
-    const broadSpend = broadRows.reduce((s, r) => s + r.cost, 0)
+      if (cs === 0) return null
+      return { name: c, spend: cs, roas: ss / cs }
+    }).filter(Boolean) as { name: string; spend: number; roas: number }[]
+
+    const recCamps = campBreakdown.filter(c => c.spend >= 10 && c.roas < 1.0).map(c => c.name)
+
+    // auto_spend / broad_spend kept for legacy UI — sum only campaigns matching type
+    const autoSpend  = campBreakdown.filter(c => c.name.toLowerCase().includes('auto')).reduce((s, c) => s + c.spend, 0)
+    const broadSpend = campBreakdown.filter(c => c.name.toLowerCase().includes('broad')).reduce((s, c) => s + c.spend, 0)
+    const autoSales  = rows.filter(r => r.campaign_name.toLowerCase().includes('auto') && r.search_term.toLowerCase().includes(row.ngram)).reduce((s, r) => s + r.sales, 0)
+    const broadSales = rows.filter(r => r.campaign_name.toLowerCase().includes('broad') && r.search_term.toLowerCase().includes(row.ngram)).reduce((s, r) => s + r.sales, 0)
+
     phraseCandidates.push({
       ...row, priority: pri, ngram_type: ngramSize === 1 ? 'Unigram' : `${ngramSize}-gram`,
+      camp_breakdown: campBreakdown,
       campaigns: [autoSpend > 0 && 'auto', broadSpend > 0 && 'broad'].filter(Boolean).join(', '),
       auto_spend: autoSpend, broad_spend: broadSpend,
-      auto_roas:  autoSpend  > 0 ? autoRows.reduce((s, r) => s + r.sales, 0)  / autoSpend  : 0,
-      broad_roas: broadSpend > 0 ? broadRows.reduce((s, r) => s + r.sales, 0) / broadSpend : 0,
-      recommended_scope: recCamps.length > 0 ? recCamps.join(', ') : campaigns.join(', '),
+      auto_roas:  autoSpend  > 0 ? autoSales  / autoSpend  : 0,
+      broad_roas: broadSpend > 0 ? broadSales / broadSpend : 0,
+      recommended_scope: recCamps.length > 0 ? recCamps.join(', ') : campBreakdown.filter(c => c.spend > 0).map(c => c.name).join(', '),
     })
   }
 
@@ -431,23 +461,31 @@ export async function GET(request: NextRequest) {
       .contains('upload_ids', [uploadId])
       .order('total_spend', { ascending: false })
 
-    // Build portfolio health for sidebar
-    const portfolioRuns = (runs ?? []).filter((r: any) => r.portfolio).map((r: any) => {
-      const wasted_pct = r.total_spend > 0 ? r.total_wasted / r.total_spend : 0
-      const high       = r.high_negatives ?? 0
-      return {
-        portfolio:         r.portfolio,
-        run_id:            r.id,
-        analysed_at:       r.analysed_at,
-        total_spend:       r.total_spend,
-        total_wasted:      r.total_wasted,
-        wasted_pct,
-        high_negatives:    high,
-        harvest_candidates: r.harvest_candidates,
-        has_results:       !!r.results_json,
-        health: wasted_pct > 0.30 || high > 3 ? 'red' : wasted_pct > 0.15 || high > 0 ? 'amber' : 'green',
-      }
-    })
+    // Build portfolio health for sidebar — deduplicate by portfolio name, keep most recent
+    const seenPortfolios = new Set<string>()
+    const portfolioRuns = (runs ?? [])
+      .filter((r: any) => r.portfolio)
+      .filter((r: any) => {
+        if (seenPortfolios.has(r.portfolio)) return false
+        seenPortfolios.add(r.portfolio)
+        return true
+      })
+      .map((r: any) => {
+        const wasted_pct = r.total_spend > 0 ? r.total_wasted / r.total_spend : 0
+        const high       = r.high_negatives ?? 0
+        return {
+          portfolio:          r.portfolio,
+          run_id:             r.id,
+          analysed_at:        r.analysed_at,
+          total_spend:        r.total_spend,
+          total_wasted:       r.total_wasted,
+          wasted_pct,
+          high_negatives:     high,
+          harvest_candidates: r.harvest_candidates,
+          has_results:        !!r.results_json,
+          health: wasted_pct > 0.30 || high > 3 ? 'red' : wasted_pct > 0.15 || high > 0 ? 'amber' : 'green',
+        }
+      })
 
     return NextResponse.json({ portfolio_runs: portfolioRuns })
 

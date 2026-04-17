@@ -87,19 +87,17 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string;
 // ── CAMPAIGN BUTTONS (with recommendation highlighting) ───────────────────────
 // [D4] red dashed = recommended, [D5] tooltip shows spend/ROAS, [D7] $10+ threshold
 
-function CampButtons({ campaigns, selected, recommendedScope, autoSpend, autoRoas, broadSpend, broadRoas, onUpdate, updateKey }: any) {
-  const recList = (recommendedScope ?? '').split(', ').map((s: string) => s.trim()).filter(Boolean)
+function CampButtons({ campaigns, selected, recommendedScope, campBreakdown, onUpdate, updateKey }: any) {
+  const recList   = (recommendedScope ?? '').split(', ').map((s: string) => s.trim()).filter(Boolean)
+  const bdMap     = new Map((campBreakdown ?? []).map((c: any) => [c.name, c]))
   return (
     <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' as const }}>
       {(campaigns ?? []).map((c: string) => {
         const inList  = (selected ?? []).includes(c)
         const isRec   = recList.length > 0 ? recList.includes(c) : true
-        const isAuto  = c.toLowerCase().includes('auto')
-        const isBroad = c.toLowerCase().includes('broad')
-        const spend   = isAuto ? autoSpend : isBroad ? broadSpend : null
-        const roas    = isAuto ? autoRoas  : isBroad ? broadRoas  : null
-        const spendStr = spend != null ? `$${spend.toFixed(2)}` : ''
-        const roasStr  = roas  != null ? `ROAS ${roas.toFixed(2)}x` : ''
+        const bd      = bdMap.get(c)
+        const spendStr = bd ? '$' + bd.spend.toFixed(2) : ''
+        const roasStr  = bd ? 'ROAS ' + bd.roas.toFixed(2) + 'x' : ''
         const tooltip  = [c, [spendStr, roasStr].filter(Boolean).join(' · '), isRec ? 'ROAS < 1.0 — negate here' : 'converting — leave alone'].filter(Boolean).join(' — ')
         const bg     = inList ? (isRec ? '#dc2626' : 'var(--accent)') : 'var(--surface2)'
         const color  = inList ? '#fff' : isRec ? '#dc2626' : 'var(--text3)'
@@ -151,7 +149,7 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
             Apply to campaigns <span style={{ color: '#dc2626', fontWeight: 400, textTransform: 'none' as const }}>— red = recommended</span>
           </div>
           <CampButtons campaigns={campaigns} selected={d.campaigns} recommendedScope={row.recommended_scope}
-            autoSpend={row.auto_spend} autoRoas={row.auto_roas} broadSpend={row.broad_spend} broadRoas={row.broad_roas}
+            campBreakdown={row.camp_breakdown}
             onUpdate={onUpdate} updateKey={keyStr} />
         </div>
         <div>
