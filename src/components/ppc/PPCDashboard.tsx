@@ -506,7 +506,13 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
       if (endDate)   form.append('report_end_date', endDate)
 
       const res  = await fetch('/api/ppc/upload', { method: 'POST', body: form })
-      const json = await res.json()
+      let json: any
+      try {
+        const txt = await res.text()
+        json = JSON.parse(txt)
+      } catch {
+        throw new Error('Server error (' + res.status + ') — check Vercel logs for details.')
+      }
       if (!res.ok) {
         if (json.duplicate && json.existing_upload_id) {
           // Duplicate bulk file — offer to run analysis on existing upload
