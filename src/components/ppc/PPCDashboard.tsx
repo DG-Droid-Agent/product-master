@@ -89,7 +89,7 @@ function StatCard({ label, value, sub, accent }: { label: string; value: string;
 
 function CampButtons({ campaigns, selected, recommendedScope, campBreakdown, onUpdate, updateKey }: any) {
   const recList   = (recommendedScope ?? '').split(', ').map((s: string) => s.trim()).filter(Boolean)
-  const bdMap     = new Map((campBreakdown ?? []).map((c: any) => [c.name, c]))
+  const bdMap     = new Map<string, { name: string; spend: number; roas: number }>((campBreakdown ?? []).map((c: any) => [c.name, c]))
   return (
     <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' as const }}>
       {(campaigns ?? []).map((c: string) => {
