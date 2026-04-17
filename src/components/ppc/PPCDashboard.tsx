@@ -712,6 +712,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
   const [prevRun, setPrevRun]         = useState<any>(null)
   const [prevDecs, setPrevDecs]       = useState<any[]>([])
   const [histExp, setHistExp]         = useState(false)
+  const [removedCore, setRemovedCore] = useState<Set<string>>(new Set())
 
   const applyDecisions = (decisions: any[]) => {
     if (!decisions?.length) return
@@ -1185,15 +1186,56 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
         {/* ── KW NEGATIVES TAB ─────────────────────────────────────────────── */}
         {activeTab === 'kw_neg' && (
           <div>
-            {(portData.core_terms?.length ?? 0) > 0 && (
-              <div style={{ background: 'rgba(22,101,52,.04)', border: '1px solid rgba(22,101,52,.2)', borderRadius: 8, padding: '8px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#166534', flexShrink: 0 }}>🛡 Protected words</span>
-                <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>— never recommended as negatives:</span>
-                {portData.core_terms.map((w: string) => (
-                  <span key={w} style={{ fontSize: 11, fontFamily: 'var(--mono)', background: 'rgba(22,101,52,.1)', color: '#166534', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>{w}</span>
-                ))}
-              </div>
-            )}
+            {(portData.core_terms?.length ?? 0) > 0 && (() => {
+              const activeCore  = (portData.core_terms as string[]).filter((w: string) => !removedCore.has(w))
+              const removedList = (portData.core_terms as string[]).filter((w: string) => removedCore.has(w))
+              return (
+                <div style={{ background: 'rgba(22,101,52,.04)', border: '1px solid rgba(22,101,52,.2)', borderRadius: 8, padding: '8px 14px', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#166534', flexShrink: 0 }}>🛡 Protected</span>
+                    <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>— click ✕ to unprotect (will appear as negative candidate):</span>
+                    {activeCore.map((w: string) => (
+                      <span key={w} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--mono)', background: 'rgba(22,101,52,.1)', color: '#166534', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>
+                        {w}
+                        <button onClick={() => setRemovedCore(p => { const n = new Set(p); n.add(w); return n })}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#166534', fontSize: 10, padding: 0, lineHeight: 1, opacity: 0.7, marginLeft: 1 }} title="Remove from protected list">✕</button>
+                      </span>
+                    ))}
+                  </div>
+                  {removedList.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' as const }}>
+                      <span style={{ fontSize: 10, color: 'var(--text3)', flexShrink: 0 }}>Unprotected (may now appear as negatives):</span>
+                      {removedList.map((w: string) => (
+                        <span key={w} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--mono)', background: 'rgba(220,38,38,.08)', color: '#dc2626', borderRadius: 4, padding: '1px 6px', textDecoration: 'line-through', opacity: 0.7 }}>
+                          {w}
+                          <button onClick={() => setRemovedCore(p => { const n = new Set(p); n.delete(w); return n })}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: 10, padding: 0, lineHeight: 1, marginLeft: 1 }} title="Re-add to protected list">↩</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+            {removedCore.size > 0 && (() => {
+              // Show unprotected words from n-gram table so user can act on them
+              const unprotectedRows = (portData.ngrams?.uni ?? [])
+                .filter((u: any) => removedCore.has(u.ngram) && (u.roas < 1.5 || u.wasted_spend >= 15))
+                .sort((a: any, b: any) => b.wasted_spend - a.wasted_spend)
+              if (!unprotectedRows.length) return null
+              return (
+                <div style={{ marginBottom: 18 }}>
+                  <SectionTitle label="Unprotected words — review as negatives" sub="Previously protected · now eligible based on your override" color="#b45309" />
+                  {unprotectedRows.map((r: any) => (
+                    <NegRow key={r.ngram} row={{ ...r, ngram_type: 'Unigram', wasted_spend: r.wasted_spend, recommended_scope: '' }}
+                      keyStr={'neg_phrase_' + r.ngram} selected={selected}
+                      decision={decisionMap.get('neg_phrase_' + r.ngram)}
+                      onToggle={(k: string) => toggle(k, [])} onUpdate={update}
+                      campaigns={summary.campaigns ?? []} />
+                  ))}
+                </div>
+              )
+            })()}
             {(portData.phrase_high?.length ?? 0) > 0 && (
               <div style={{ marginBottom: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>

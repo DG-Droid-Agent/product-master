@@ -167,13 +167,14 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
   // A) Top-20 unigrams by spend with ROAS >= 2.0
   const coreBySpend = new Set(
     [...uni].sort((a, b) => b.total_cost - a.total_cost).slice(0, 20)
-      .filter(u => u.roas >= 2.0).map(u => u.ngram)
+      .filter(u => u.roas >= 2.0 && u.ngram.length >= 3).map(u => u.ngram)
   )
   // B) Product words extracted from portfolio name
   const coreFromPortfolio = extractPortfolioCore(portfolioName)
   // C) Any unigram converting at ROAS >= 2.0 in ANY campaign with $5+ spend
   const coreByPerformance = new Set<string>()
   for (const u of uni) {
+    if (u.ngram.length < 3) continue  // skip 1-2 char words (a, b, xl, oz etc)
     for (const c of campaigns) {
       const cr = rows.filter(r => r.campaign_name === c && r.search_term.toLowerCase().includes(u.ngram))
       const cs = cr.reduce((s, r) => s + r.cost, 0)
