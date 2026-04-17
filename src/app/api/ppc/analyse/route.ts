@@ -24,7 +24,7 @@ interface SearchTermRow {
   matched_keyword?: string
 }
 
-// ── N-GRAM HELPERS ─────────────────────────────────────────────────────────────
+// ── HELPERS ───────────────────────────────────────────────────────────────────
 
 function getNgrams(text: string, n: number): string[] {
   const words = text.toLowerCase().match(/[a-z0-9]+/g)?.filter(w => w.length > 1 || /[a-z]/.test(w)) ?? []
@@ -32,55 +32,61 @@ function getNgrams(text: string, n: number): string[] {
   return Array.from({ length: words.length - n + 1 }, (_, i) => words.slice(i, i + n).join(' '))
 }
 
-function buildNgramTable(rows: SearchTermRow[], n: number) {
-  const buckets = new Map<string, { cost: number; sales: number; purchases: number; wasted: number; count: number }>()
-  for (const row of rows) {
+// Extract core product words from portfolio name
+// e.g. "Utensil Holder w/Hooks B07KWRCXP5" -> ["utensil","holder","hooks"]
+function extractPortfolioCore(portfolioName: string): Set<string> {
+  const stop = new Set(['with','and','the','for','all','new','top','set','pro','kit','pack','best','our','sp','kw','kwds','broad','exact','phrase','auto','mod','rnk','st','sb','sd'])
+  const asinPat = /^[A-Z0-9]{10}$/
+  const words = (portfolioName || '').toLowerCase().match(/[a-z0-9]+/g) ?? []
+  return new Set(words.filter(w => w.length > 2 && !stop.has(w) && !asinPat.test(w.toUpperCase())))
+}
+
+// Per-campaign breakdown for a search term or n-gram
+function getCampBreakdown(
+  ngram: string,
+  rows: SearchTermRow[],
+  campaigns: string[],
+  exactMatch = false
+): { name: string; spend: number; sales: number; roas: number; orders: number; clicks: number }[] {
+  return campaigns.map(c => {
+    const cr = rows.filter(r =>
+      r.campaign_name === c &&
+      (exactMatch ? r.search_term.toLowerCase() === ngram : r.search_term.toLowerCase().includes(ngram))
+    )
+    if (!cr.length) return null
+    const cs = cr.reduce((s, r) => s + r.cost, 0)
+    const ss = cr.reduce((s, r) => s + r.sales, 0)
+    const op = cr.reduce((s, r) => s + r.purchases, 0)
+    const ck = cr.reduce((s, r) => s + ((r as any).clicks ?? 0), 0)
+    if (cs === 0) return null
+    return { name: c, spend: cs, sales: ss, roas: ss / cs, orders: op, clicks: ck }
+  }).filter(Boolean) as { name: string; spend: number; sales: number; roas: number; orders: number; clicks: number }[]
+}
+
+// Recommended campaigns to negate: spend >= $10 AND ROAS < 1.0
+function getRecommendedNegates(bd: { name: string; spend: number; roas: number }[]): string[] {
+  return bd.filter(c => c.spend >= 10 && c.roas < 1.0).map(c => c.name)
+}
+
+// N-gram table built on AGGREGATED rows
+function buildNgramTable(agg: (SearchTermRow & { clicks?: number })[], n: number) {
+  const buckets = new Map<string, { cost: number; sales: number; purchases: number; wasted: number; clicks: number; count: number }>()
+  for (const row of agg) {
     const wasted = row.purchases === 0 ? row.cost : 0
     for (const gram of getNgrams(row.search_term, n)) {
-      const b = buckets.get(gram) ?? { cost: 0, sales: 0, purchases: 0, wasted: 0, count: 0 }
+      const b = buckets.get(gram) ?? { cost: 0, sales: 0, purchases: 0, wasted: 0, clicks: 0, count: 0 }
       b.cost += row.cost; b.sales += row.sales; b.purchases += row.purchases
-      b.wasted += wasted; b.count += 1
+      b.wasted += wasted; b.clicks += (row.clicks ?? 0); b.count += 1
       buckets.set(gram, b)
     }
   }
   return Array.from(buckets.entries()).map(([ngram, b]) => ({
     ngram, appearances: b.count, total_cost: b.cost, wasted_spend: b.wasted,
-    total_sales: b.sales, purchases: b.purchases,
+    total_sales: b.sales, purchases: b.purchases, clicks: b.clicks,
     roas:      b.cost > 0 ? b.sales / b.cost : 0,
     acos:      b.sales > 0 ? b.cost / b.sales * 100 : b.cost > 0 ? 100 : 0,
     waste_pct: b.cost > 0 ? b.wasted / b.cost : 0,
   })).sort((a, b) => b.wasted_spend - a.wasted_spend)
-}
-
-function findCoreTerms(uni: any[]): Set<string> {
-  // Core terms = protected from being recommended as negatives
-  // Include top-spend unigrams with good aggregate ROAS
-  const bySpend = [...uni].sort((a, b) => b.total_cost - a.total_cost).slice(0, 15).filter(u => u.roas >= 2.0).map(u => u.ngram)
-  return new Set(bySpend)
-}
-
-function hasCorePerformance(ngram: string, rows: SearchTermRow[]): boolean {
-  // Check if this ngram converts well in ANY campaign with meaningful spend
-  // Protects words like 'fork', 'spoon' that are core product terms
-  // even if their aggregate ROAS is dragged down by many tiny long-tail zero-purchase queries
-  const campaigns = [...new Set(rows.map(r => r.campaign_name))]
-  for (const camp of campaigns) {
-    const cr = rows.filter(r => r.campaign_name === camp && r.search_term.toLowerCase().includes(ngram))
-    const cs = cr.reduce((s, r) => s + r.cost, 0)
-    const ss = cr.reduce((s, r) => s + r.sales, 0)
-    if (cs >= 5 && ss / cs >= 2.0) return true
-  }
-  return false
-}
-
-function classifyPriority(row: any, ngramSize: number): 'HIGH' | 'MEDIUM' | 'WATCH' | null {
-  const { appearances, wasted_spend: wasted, roas, acos } = row
-  const significant = ngramSize === 1 ? (appearances >= 10 || wasted >= 25) : (appearances >= 20 || wasted >= 30)
-  if (!significant) return 'WATCH'
-  if (roas < 1.0 || acos > 100) return 'HIGH'
-  if (roas < 1.5) return 'MEDIUM'
-  if (roas < 2.0) return 'WATCH'
-  return null
 }
 
 const MATERIAL_MODIFIERS = new Set(['coir','coco','natural','jute','sisal','bamboo','rubber','pvc','polypropylene','nylon'])
@@ -105,28 +111,12 @@ function analysePT(ptRows: SearchTermRow[], campaigns: string[]) {
   }
   const ptNegatives: any[] = []
   const ptHarvest:   any[] = []
-  for (const [expr, b] of exprMap) {
-    if (expr === 'unknown') continue
+  for (const [expr, b] of exprMap.entries()) {
     const roas = b.cost > 0 ? b.sales / b.cost : 0
-    if (roas < 1.0 && b.cost >= 10) {
-      const campBreakdown = campaigns.map(c => {
-        const cr = ptRows.filter(r => r.campaign_name === c && (r.pt_expression || '') === expr)
-        const cs = cr.reduce((s, r) => s + r.cost, 0)
-        const ss = cr.reduce((s, r) => s + r.sales, 0)
-        return cs > 0 ? { name: c, spend: cs, roas: cs > 0 ? ss / cs : 0 } : null
-      }).filter(Boolean) as { name: string; spend: number; roas: number }[]
-      const recCamps = campBreakdown.filter(c => c.roas < 1.0 && c.spend >= 10).map(c => c.name)
-      ptNegatives.push({
-        pt_expression: expr, wasted_spend: b.cost - b.sales > 0 ? b.cost - b.sales : b.cost,
-        total_spend: b.cost, total_sales: b.sales, roas,
-        acos: b.sales > 0 ? b.cost / b.sales * 100 : 100,
-        priority: roas === 0 ? 'HIGH' : 'MEDIUM',
-        campaigns: b.campaigns, camp_breakdown: campBreakdown,
-        recommended_scope: recCamps.join(', ') || b.campaigns.join(', '),
-        action: expr.startsWith('asin=') ? `Exclude ASIN ${expr.replace(/asin="|"/g, '')} from product targeting` : `Add "${expr}" as negative product target`,
-      })
+    if (b.cost >= 10 && roas < 1.0) {
+      ptNegatives.push({ pt_expression: expr, total_spend: b.cost, total_sales: b.sales, orders: b.orders, roas, priority: 'HIGH', campaigns: b.campaigns })
     }
-    if (roas >= 3.0 && b.cost >= 20 && b.orders >= 3) {
+    if (b.orders >= 3 && b.cost >= 20 && roas >= 3.0) {
       ptHarvest.push({
         pt_expression: expr, total_spend: b.cost, total_sales: b.sales, orders: b.orders, roas,
         acos: b.sales > 0 ? b.cost / b.sales * 100 : 0, conviction: roas * b.cost,
@@ -142,96 +132,163 @@ function analysePT(ptRows: SearchTermRow[], campaigns: string[]) {
   }
 }
 
-// ── KEYWORD ANALYSIS ──────────────────────────────────────────────────────────
+// ── SOTA KEYWORD ANALYSIS ─────────────────────────────────────────────────────
+//
+// METHODOLOGY:
+// 1. Term-level exact negatives: specific bad search terms (30+ clicks OR $15+ spend, 0 purchases)
+// 2. N-gram phrase negatives: only when 30+ aggregate clicks AND no campaign converts the n-gram well
+// 3. Portfolio product word protection: words from portfolio name are never flagged
+// 4. Per-campaign-type scoping: recommend negating only in campaigns where the term performs poorly
+// 5. Harvest candidates: high-ROAS, high-spend terms to push to Exact/Phrase/Broad
+// 6. Toxic combos: word combinations that waste despite each word converting alone
 
-function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[]) {
+function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[], portfolioName = '') {
   const campaigns = [...new Set(rows.map(r => r.campaign_name))]
-  const aggMap = new Map<string, SearchTermRow>()
+
+  // Step 1: Aggregate by search term across all campaigns
+  const aggMap = new Map<string, SearchTermRow & { clicks: number }>()
   for (const row of rows) {
     const ex = aggMap.get(row.search_term)
-    if (ex) { ex.cost += row.cost; ex.purchases += row.purchases; ex.sales += row.sales }
-    else aggMap.set(row.search_term, { ...row })
+    if (ex) {
+      ex.cost += row.cost; ex.purchases += row.purchases; ex.sales += row.sales
+      ex.clicks += ((row as any).clicks ?? 0)
+    } else {
+      aggMap.set(row.search_term, { ...row, clicks: (row as any).clicks ?? 0 })
+    }
   }
   const agg = Array.from(aggMap.values())
-  const uni  = buildNgramTable(agg, 1)
-  const bi   = buildNgramTable(agg, 2)
-  const tri  = buildNgramTable(agg, 3)
-  const core = findCoreTerms(uni)
+
+  // Step 2: Build n-gram tables
+  const uni = buildNgramTable(agg, 1)
+  const bi  = buildNgramTable(agg, 2)
+  const tri = buildNgramTable(agg, 3)
+
+  // Step 3: Core term protection (3 layers)
+  // A) Top-20 unigrams by spend with ROAS >= 2.0
+  const coreBySpend = new Set(
+    [...uni].sort((a, b) => b.total_cost - a.total_cost).slice(0, 20)
+      .filter(u => u.roas >= 2.0).map(u => u.ngram)
+  )
+  // B) Product words extracted from portfolio name
+  const coreFromPortfolio = extractPortfolioCore(portfolioName)
+  // C) Any unigram converting at ROAS >= 2.0 in ANY campaign with $5+ spend
+  const coreByPerformance = new Set<string>()
+  for (const u of uni) {
+    for (const c of campaigns) {
+      const cr = rows.filter(r => r.campaign_name === c && r.search_term.toLowerCase().includes(u.ngram))
+      const cs = cr.reduce((s, r) => s + r.cost, 0)
+      const ss = cr.reduce((s, r) => s + r.sales, 0)
+      if (cs >= 5 && ss / cs >= 2.0) { coreByPerformance.add(u.ngram); break }
+    }
+  }
+  const core = new Set([...coreBySpend, ...coreFromPortfolio, ...coreByPerformance])
+
   const existingKwSet = new Set(existingKeywords.map(k => k.toLowerCase().trim()).filter(k => k !== 'close-match'))
+  const phraseNegDict = new Map<string, string>()
+
+  // ── A: TERM-LEVEL EXACT NEGATIVES ──────────────────────────────────────────
+  // Specific search terms that are definitively non-converting
+  const exactNegatives = agg
+    .filter(r => {
+      if (r.purchases > 0) return false
+      const qualifiesBySpend  = r.cost >= 15
+      const qualifiesByClicks = (r.clicks ?? 0) >= 30
+      if (!qualifiesBySpend && !qualifiesByClicks) return false
+      // Exclude if any single campaign converts this exact term well
+      for (const c of campaigns) {
+        const cr = rows.filter(rr => rr.campaign_name === c && rr.search_term === r.search_term)
+        const cs = cr.reduce((s, rr) => s + rr.cost, 0)
+        const ss = cr.reduce((s, rr) => s + rr.sales, 0)
+        if (cs >= 5 && ss / cs >= 2.0) return false
+      }
+      return true
+    })
+    .sort((a, b) => b.cost - a.cost)
+    .map(row => {
+      const tl       = row.search_term.toLowerCase()
+      const campBD   = getCampBreakdown(tl, rows, campaigns, true)
+      const recCamps = getRecommendedNegates(campBD)
+      const matches  = Array.from(phraseNegDict.keys()).filter(p => tl.includes(p))
+      const highMed  = matches.filter(p => ['HIGH','MEDIUM'].includes(phraseNegDict.get(p)!))
+      return {
+        search_term: row.search_term, cost: row.cost, wasted_spend: row.cost,
+        clicks: row.clicks ?? 0, roas: 0, acos: 100,
+        coverage: highMed.length > 0 ? 'Covered by phrase' : matches.length > 0 ? 'Partial' : 'Not covered',
+        covered_by: (highMed.length > 0 ? highMed : matches).join(', '),
+        campaigns: campBD.map(c => c.name).join(', '),
+        camp_breakdown: campBD,
+        recommended_scope: recCamps.join(', ') || campBD.map(c => c.name).join(', '),
+      }
+    })
+
+  // ── B: N-GRAM PHRASE NEGATIVES ─────────────────────────────────────────────
   const phraseCandidates: any[] = []
 
   const processNgram = (row: any, ngramSize: number) => {
-    if (row.ngram.split(' ').every((w: string) => core.has(w))) return
-    // For unigrams: skip if this exact word performs well in any campaign
-    // This prevents core product words from being flagged as negatives
-    if (ngramSize === 1 && hasCorePerformance(row.ngram, rows)) return
-    const pri = classifyPriority(row, ngramSize)
-    if (!pri) return
+    const ng = row.ngram
+    // Core protection
+    if (ngramSize === 1 && core.has(ng)) return
+    if (ngramSize > 1 && ng.split(' ').every((w: string) => core.has(w))) return
 
-    // Per-campaign breakdown — correct spend/ROAS per specific campaign
-    const campBreakdown = campaigns.map(c => {
-      const cr = rows.filter(r => r.campaign_name === c && r.search_term.toLowerCase().includes(row.ngram))
-      if (!cr.length) return null
-      const cs = cr.reduce((s, r) => s + r.cost, 0)
-      const ss = cr.reduce((s, r) => s + r.sales, 0)
-      if (cs === 0) return null
-      return { name: c, spend: cs, roas: ss / cs }
-    }).filter(Boolean) as { name: string; spend: number; roas: number }[]
+    // Statistical significance: 30+ aggregate clicks OR $25+ wasted
+    const totalClicks = row.clicks ?? 0
+    if (totalClicks < 30 && row.wasted_spend < 25) return
 
-    const recCamps = campBreakdown.filter(c => c.spend >= 10 && c.roas < 1.0).map(c => c.name)
+    // Priority classification
+    const { roas, acos, wasted_spend: wasted } = row
+    let priority: 'HIGH' | 'MEDIUM' | 'WATCH' | null = null
+    if (roas < 1.0 || acos > 100) priority = 'HIGH'
+    else if (roas < 1.5) priority = 'MEDIUM'
+    else if (roas < 2.0) priority = 'WATCH'
+    if (!priority) return
 
-    // auto_spend / broad_spend kept for legacy UI — sum only campaigns matching type
-    const autoSpend  = campBreakdown.filter(c => c.name.toLowerCase().includes('auto')).reduce((s, c) => s + c.spend, 0)
-    const broadSpend = campBreakdown.filter(c => c.name.toLowerCase().includes('broad')).reduce((s, c) => s + c.spend, 0)
-    const autoSales  = rows.filter(r => r.campaign_name.toLowerCase().includes('auto') && r.search_term.toLowerCase().includes(row.ngram)).reduce((s, r) => s + r.sales, 0)
-    const broadSales = rows.filter(r => r.campaign_name.toLowerCase().includes('broad') && r.search_term.toLowerCase().includes(row.ngram)).reduce((s, r) => s + r.sales, 0)
+    // Per-campaign breakdown
+    const campBD = getCampBreakdown(ng, rows, campaigns, false)
+
+    // SOTA check: skip if ANY campaign converts this n-gram well
+    if (campBD.some(c => c.spend >= 5 && c.roas >= 2.0)) return
+
+    const recCamps = getRecommendedNegates(campBD)
+    const negBroadAuto = campBD.filter(c => (c.name.toLowerCase().includes('broad') || c.name.toLowerCase().includes('auto')) && c.spend >= 10 && c.roas < 1.0).map(c => c.name)
+    const negExact     = campBD.filter(c => c.name.toLowerCase().includes('exact') && c.spend >= 10 && c.roas < 1.0).map(c => c.name)
+    const autoSpend    = campBD.filter(c => c.name.toLowerCase().includes('auto')).reduce((s, c) => s + c.spend, 0)
+    const broadSpend   = campBD.filter(c => c.name.toLowerCase().includes('broad')).reduce((s, c) => s + c.spend, 0)
+    const autoSales    = campBD.filter(c => c.name.toLowerCase().includes('auto')).reduce((s, c) => s + c.sales, 0)
+    const broadSales   = campBD.filter(c => c.name.toLowerCase().includes('broad')).reduce((s, c) => s + c.sales, 0)
 
     phraseCandidates.push({
-      ...row, priority: pri, ngram_type: ngramSize === 1 ? 'Unigram' : `${ngramSize}-gram`,
-      camp_breakdown: campBreakdown,
-      campaigns: [autoSpend > 0 && 'auto', broadSpend > 0 && 'broad'].filter(Boolean).join(', '),
+      ...row, priority,
+      ngram_type: ngramSize === 1 ? 'Unigram' : ngramSize === 2 ? 'Bigram' : 'Trigram',
+      camp_breakdown: campBD,
+      recommended_scope: recCamps.join(', ') || campBD.filter(c => c.spend > 0).map(c => c.name).join(', '),
+      negate_broad_auto: negBroadAuto.join(', '),
+      negate_exact: negExact.join(', '),
       auto_spend: autoSpend, broad_spend: broadSpend,
       auto_roas:  autoSpend  > 0 ? autoSales  / autoSpend  : 0,
       broad_roas: broadSpend > 0 ? broadSales / broadSpend : 0,
-      recommended_scope: recCamps.length > 0 ? recCamps.join(', ') : campBreakdown.filter(c => c.spend > 0).map(c => c.name).join(', '),
     })
+    phraseNegDict.set(ng, priority)
   }
 
-  for (const row of uni) { if (!core.has(row.ngram)) processNgram(row, 1) }
+  for (const row of uni) processNgram(row, 1)
   for (const row of [...bi, ...tri]) processNgram(row, row.ngram.split(' ').length)
 
   const phraseHigh   = phraseCandidates.filter(p => p.priority === 'HIGH').sort((a: any, b: any) => b.wasted_spend - a.wasted_spend)
   const phraseMedium = phraseCandidates.filter(p => p.priority === 'MEDIUM').sort((a: any, b: any) => b.wasted_spend - a.wasted_spend)
   const phraseWatch  = phraseCandidates.filter(p => p.priority === 'WATCH').sort((a: any, b: any) => b.wasted_spend - a.wasted_spend)
 
-  const phraseNegDict = new Map(phraseCandidates.filter(p => ['HIGH','MEDIUM'].includes(p.priority)).map(p => [p.ngram, p.priority]))
-  const exactNegatives = agg
-    .filter(r => r.purchases === 0 && r.cost >= 15)
-    .sort((a, b) => b.cost - a.cost)
-    .map(row => {
-      const tl      = row.search_term.toLowerCase()
-      const matches = Array.from(phraseNegDict.keys()).filter(p => tl.includes(p))
-      const highMed = matches.filter(p => ['HIGH','MEDIUM'].includes(phraseNegDict.get(p)!))
-      const camps   = [...new Set(rows.filter(r => r.search_term.toLowerCase() === tl).map(r => r.campaign_name))]
-      return { search_term: row.search_term, cost: row.cost, wasted_spend: row.cost, roas: 0, acos: 100, coverage: highMed.length > 0 ? 'Covered' : matches.length > 0 ? 'Partial' : 'Not covered', covered_by: (highMed.length > 0 ? highMed : matches).join(', '), campaigns: camps.join(', ') }
-    })
-
-  const goodWords  = new Set(uni.filter(u => u.roas >= 2.0).map(u => u.ngram))
+  // ── C: TOXIC COMBOS ────────────────────────────────────────────────────────
+  const goodWords = new Set(uni.filter(u => u.roas >= 2.0).map(u => u.ngram))
   const toxicCombos = [...bi, ...tri]
     .filter(row => row.roas < 1.0 && row.ngram.split(' ').every((w: string) => goodWords.has(w)))
     .map(row => {
-      const campRows     = rows.filter(r => r.search_term.toLowerCase().includes(row.ngram))
-      const campBreakdown = campaigns.map(c => {
-        const cr = campRows.filter(r => r.campaign_name === c)
-        const cs = cr.reduce((s, r) => s + r.cost, 0)
-        const ss = cr.reduce((s, r) => s + r.sales, 0)
-        return cs > 0 ? { name: c, spend: cs, roas: cs > 0 ? ss / cs : 0 } : null
-      }).filter(Boolean) as { name: string; spend: number; roas: number }[]
-      const recCamps = campBreakdown.filter(c => c.roas < 1.0 && c.spend >= 10).map(c => c.name)
-      return { ...row, combo_type: row.ngram.split(' ').length === 2 ? 'bigram' : 'trigram', reason: `Each word ROAS≥2.0 but combined ROAS=${row.roas.toFixed(2)}`, priority: 'HIGH', recommended_scope: recCamps.join(', ') || campaigns.join(', '), camp_breakdown: campBreakdown }
+      const campBD   = getCampBreakdown(row.ngram, rows, campaigns, false)
+      const recCamps = campBD.filter(c => c.roas < 1.0 && c.spend >= 10).map(c => c.name)
+      return { ...row, combo_type: row.ngram.split(' ').length === 2 ? 'bigram' : 'trigram', reason: `Each word ROAS≥2.0 but combined ROAS=${row.roas.toFixed(2)}`, priority: 'HIGH', recommended_scope: recCamps.join(', ') || campaigns.join(', '), camp_breakdown: campBD }
     })
     .sort((a: any, b: any) => b.wasted_spend - a.wasted_spend)
 
+  // ── D: HARVEST CANDIDATES ──────────────────────────────────────────────────
   const TARGET_ACOS = 1 / 3.0
   const harvestCandidates = agg
     .filter(r => r.cost > 0 && r.sales / r.cost >= 3.0 && r.cost >= 20 && r.purchases >= 3)
@@ -243,32 +300,28 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
       const partial = !isExact ? [...existingKwSet].filter(k => k.includes(tl) || tl.includes(k)) : []
       const matchTypes = [...(p >= 5 ? ['Exact'] : []), 'Phrase', ...(p >= 3 && row.search_term.split(' ').length <= 2 ? ['Broad'] : [])]
       const avgOV  = row.sales / p
-      const campBreakdown = campaigns.map(c => {
-        const cr = rows.filter(r => r.campaign_name === c && r.search_term.toLowerCase() === tl)
-        const cs = cr.reduce((s, r) => s + r.cost, 0)
-        const ss = cr.reduce((s, r) => s + r.sales, 0)
-        const cp = cr.reduce((s, r) => s + r.purchases, 0)
-        return cs > 0 ? `${c}: ${cp} orders @ ROAS ${(ss/cs).toFixed(1)}x` : null
-      }).filter(Boolean).join(' | ')
+      const campBD = getCampBreakdown(tl, rows, campaigns, true)
       return {
         search_term: row.search_term, purchases: p, cost: row.cost, sales: row.sales, roas,
         acos: row.cost / row.sales, conviction: roas * row.cost,
         confidence: p >= 10 && roas >= 5 ? '⭐⭐⭐ HIGH' : p >= 5 && roas >= 3 ? '⭐⭐ MEDIUM' : '⭐ EMERGING',
         match_types: matchTypes.join(', '),
         existing_targeting: isExact ? '⚠️ Already targeted' : partial.length > 0 ? `⚡ Partially covered: ${partial.join(', ')}` : '🆕 New — not targeted',
-        campaign_breakdown: campBreakdown, avg_order_value: avgOV,
+        campaign_breakdown: campBD.map(c => `${c.name}: ${c.orders} orders @ ROAS ${c.roas.toFixed(1)}x`).join(' | '),
+        avg_order_value: avgOV,
         suggested_bid: Math.min(3.00, Math.max(0.20, +(avgOV * TARGET_ACOS).toFixed(2))),
         generic_flag: genericFlag(row.search_term),
       }
     })
     .sort((a: any, b: any) => b.conviction - a.conviction)
 
+  // ── SUMMARY ────────────────────────────────────────────────────────────────
   const totalCost   = agg.reduce((s, r) => s + r.cost, 0)
   const totalSales  = agg.reduce((s, r) => s + r.sales, 0)
   const totalWasted = agg.reduce((s, r) => s + (r.purchases === 0 ? r.cost : 0), 0)
   const addressable = phraseHigh.reduce((s: number, r: any) => s + r.wasted_spend, 0)
                     + phraseMedium.reduce((s: number, r: any) => s + r.wasted_spend, 0)
-                    + exactNegatives.filter(e => e.coverage !== 'Covered').reduce((s, r) => s + r.wasted_spend, 0)
+                    + exactNegatives.filter(e => e.coverage !== 'Covered by phrase').reduce((s, r) => s + r.wasted_spend, 0)
 
   return {
     summary: {
@@ -288,11 +341,11 @@ function analyseKeywords(rows: SearchTermRow[], dateRangeDays: number, existingK
 // ── SINGLE PORTFOLIO ANALYSIS ─────────────────────────────────────────────────
 // [A1] NOT exported
 
-async function runPortfolioAnalysis(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[]) {
+async function runPortfolioAnalysis(rows: SearchTermRow[], dateRangeDays: number, existingKeywords: string[], portfolioName = '') {
   const kwRows = rows.filter(r => r.targeting_type !== 'pt')
   const ptRows = rows.filter(r => r.targeting_type === 'pt')
   const campaigns = [...new Set(rows.map(r => r.campaign_name))]
-  const kwResult  = analyseKeywords(kwRows.length ? kwRows : rows, dateRangeDays, existingKeywords)
+  const kwResult  = analyseKeywords(kwRows.length ? kwRows : rows, dateRangeDays, existingKeywords, portfolioName)
   const ptResult  = ptRows.length ? analysePT(ptRows, campaigns) : { pt_negatives: [], pt_harvest: [] }
   return { ...kwResult, ...ptResult }
 }
@@ -370,7 +423,7 @@ export async function POST(request: NextRequest) {
     if (!allRows.length) return NextResponse.json({ error: `No data found for this upload` }, { status: 404 })
 
     const existingKeywords = [...new Set(allRows.map((r: any) => r.matched_keyword).filter(Boolean))] as string[]
-    const results = await runPortfolioAnalysis(allRows as SearchTermRow[], date_range_days, existingKeywords)
+    const results = await runPortfolioAnalysis(allRows as SearchTermRow[], date_range_days, existingKeywords, portfolio ?? '')
 
     // [A5] Build run name
     const dates     = (uploadMeta ?? []).flatMap((u: any) => [u.report_start_date, u.report_end_date].filter(Boolean))

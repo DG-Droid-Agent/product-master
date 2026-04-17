@@ -119,9 +119,32 @@ function CampButtons({ campaigns, selected, recommendedScope, campBreakdown, onU
 // ── NEG ROW (keyword) ─────────────────────────────────────────────────────────
 
 function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns, isExact = false }: any) {
-  const isOn = selected.has(keyStr)
-  const d    = decision ?? { status: 'pending', campaigns: [], notes: '' }
+  const isOn   = selected.has(keyStr)
+  const d      = decision ?? { status: 'pending', campaigns: [], notes: '' }
   const wasted = row.wasted_spend ?? row.cost ?? 0
+  const isDone = d.status === 'actioned' || d.status === 'not_actioning'
+  const st     = STATUS[d.status as keyof typeof STATUS]
+
+  // Compact view for already-actioned decisions — prevent duplicate logging
+  if (isDone) {
+    return (
+      <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: 'var(--surface2)', padding: '8px 14px', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 10, opacity: 0.75 }}>
+        <span style={{ fontSize: 13, flexShrink: 0 }}>{st?.icon ?? '✅'}</span>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: 'var(--text3)' }}>{isExact ? row.search_term : row.ngram}</span>
+        {!isExact && row.ngram_type && <span style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--surface3)', borderRadius: 4, padding: '1px 5px' }}>{row.ngram_type}</span>}
+        <span style={{ fontSize: 11, color: st?.color ?? 'var(--text3)', fontWeight: 600 }}>{st?.label ?? d.status}</span>
+        {d.campaign_names?.length > 0 && <span style={{ fontSize: 11, color: 'var(--text3)' }}>{d.campaign_names.join(' · ')}</span>}
+        {d.notes && <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>"{d.notes}"</span>}
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>${wasted.toFixed(2)}</span>
+        <button onClick={() => onUpdate(keyStr, 'status', 'pending')}
+          style={{ fontSize: 10, color: 'var(--text3)', background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 7px', cursor: 'pointer' }}>
+          Reopen
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div style={{ border: `1px solid ${isOn ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 8, background: isOn ? 'var(--accent-light)' : 'var(--surface)', padding: '10px 14px', marginBottom: 5 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -129,11 +152,12 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
           style={{ width: 15, height: 15, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700 }}>{isExact ? row.search_term : row.ngram}</span>
         {!isExact && row.ngram_type && <span style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{row.ngram_type}</span>}
-        {isExact && row.coverage !== 'Not covered' && <Badge color="#166534" bg="rgba(22,101,52,.1)">{row.coverage === 'Covered' ? '✓ Covered' : '⚡ Partial'}</Badge>}
+        {isExact && row.coverage !== 'Not covered' && <Badge color="#166534" bg="rgba(22,101,52,.1)">{row.coverage === 'Covered by phrase' ? '✓ Covered' : '⚡ Partial'}</Badge>}
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', fontFamily: 'var(--mono)' }}>${wasted.toFixed(2)} wasted</span>
         {(row.roas ?? 0) > 0 && <span style={{ fontSize: 11, color: 'var(--text3)' }}>ROAS {row.roas?.toFixed(2)}x</span>}
         <span style={{ fontSize: 11, color: 'var(--text3)' }}>ACOS {row.acos?.toFixed(1)}%</span>
+        {(row.clicks ?? 0) > 0 && <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{row.clicks} clicks</span>}
         {row.appearances > 0 && <span style={{ fontSize: 11, color: 'var(--text3)' }}>{row.appearances} apps</span>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr', gap: 10, paddingLeft: 25, marginTop: 8 }}>
@@ -147,6 +171,8 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
         <div>
           <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>
             Apply to campaigns <span style={{ color: '#dc2626', fontWeight: 400, textTransform: 'none' as const }}>— red = recommended</span>
+            {row.negate_broad_auto && !isExact && <span style={{ marginLeft: 8, color: '#7c3aed', fontWeight: 600 }}>Phrase neg in Broad/Auto</span>}
+            {row.negate_exact && !isExact && <span style={{ marginLeft: 8, color: '#0f766e', fontWeight: 600 }}>Exact neg in Exact campaigns</span>}
           </div>
           <CampButtons campaigns={campaigns} selected={d.campaigns} recommendedScope={row.recommended_scope}
             campBreakdown={row.camp_breakdown}
@@ -1159,6 +1185,15 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
         {/* ── KW NEGATIVES TAB ─────────────────────────────────────────────── */}
         {activeTab === 'kw_neg' && (
           <div>
+            {(portData.core_terms?.length ?? 0) > 0 && (
+              <div style={{ background: 'rgba(22,101,52,.04)', border: '1px solid rgba(22,101,52,.2)', borderRadius: 8, padding: '8px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#166534', flexShrink: 0 }}>🛡 Protected words</span>
+                <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>— never recommended as negatives:</span>
+                {portData.core_terms.map((w: string) => (
+                  <span key={w} style={{ fontSize: 11, fontFamily: 'var(--mono)', background: 'rgba(22,101,52,.1)', color: '#166534', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>{w}</span>
+                ))}
+              </div>
+            )}
             {(portData.phrase_high?.length ?? 0) > 0 && (
               <div style={{ marginBottom: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -1179,7 +1214,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
             )}
             {(portData.exact_negatives?.length ?? 0) > 0 && (
               <div style={{ marginBottom: 18 }}>
-                <SectionTitle label="Exact match negatives" sub="$15+ wasted · 0 purchases" color="#dc2626" />
+                <SectionTitle label="Exact match negatives" sub="0 purchases · $15+ spend or 30+ clicks with no conversion" color="#dc2626" />
                 {portData.exact_negatives.map((r: any) => <NegRow key={r.search_term} row={r} keyStr={`neg_exact_${r.search_term}`} selected={selected} decision={decisionMap.get(`neg_exact_${r.search_term}`)} onToggle={(k: string) => toggle(k, r.campaigns?.split(', '))} onUpdate={update} campaigns={summary.campaigns ?? []} isExact />)}
               </div>
             )}
@@ -1385,24 +1420,22 @@ function DecisionsView({ orgId, brands, initialRunId, onBack }: { orgId: string;
   const filtered = decisions.filter(d =>
     (!termSearch || d.term.toLowerCase().includes(termSearch.toLowerCase()))
   )
-  // Group by portfolio, then within each portfolio by type (Negatives / Harvest)
-  const grouped: Record<string, { portfolio: string; brand: string; negatives: any[]; harvest: any[]; pts: any[] }> = {}
+  // Group: portfolio → campaign → decisions
+  type CampGroup = { campaign: string; items: any[] }
+  type PortGroup = { portfolio: string; brand: string; campaigns: Record<string, CampGroup>; totalWasted: number }
+  const grouped: Record<string, PortGroup> = {}
   for (const d of filtered) {
     const port = d.portfolio || 'Unassigned'
-    if (!grouped[port]) grouped[port] = { portfolio: port, brand: d.brand ?? '', negatives: [], harvest: [], pts: [] }
-    const isNeg     = d.match_type?.startsWith('negative')
-    const isHarvest = d.match_type?.startsWith('harvest')
-    const isPT      = d.match_type?.includes('pt')
-    if (isHarvest && isPT)      grouped[port].pts.push(d)
-    else if (isHarvest)         grouped[port].harvest.push(d)
-    else if (isNeg && isPT)     grouped[port].pts.push(d)
-    else                        grouped[port].negatives.push(d)
+    if (!grouped[port]) grouped[port] = { portfolio: port, brand: d.brand ?? '', campaigns: {}, totalWasted: 0 }
+    // Each decision may apply to multiple campaigns — show under each one
+    const camps = d.campaign_names?.length > 0 ? d.campaign_names : ['(no campaign)']
+    // For display: use first campaign as primary grouping key
+    const campKey = camps[0] ?? '(no campaign)'
+    if (!grouped[port].campaigns[campKey]) grouped[port].campaigns[campKey] = { campaign: campKey, items: [] }
+    grouped[port].campaigns[campKey].items.push(d)
+    grouped[port].totalWasted += d.wasted_at_decision ?? 0
   }
-  // Sort portfolios by number of decisions
-  const sortedPortfolios = Object.entries(grouped).sort((a, b) => 
-    (b[1].negatives.length + b[1].harvest.length + b[1].pts.length) - 
-    (a[1].negatives.length + a[1].harvest.length + a[1].pts.length)
-  )
+  const sortedPortfolios = Object.entries(grouped).sort((a, b) => b[1].totalWasted - a[1].totalWasted)
   const statusCounts = Object.fromEntries(Object.keys(STATUS).map(s => [s, decisions.filter(d => d.status === s).length]))
   const inp: React.CSSProperties = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 9px', fontSize: 12, color: 'var(--text)' }
 
@@ -1450,47 +1483,60 @@ function DecisionsView({ orgId, brands, initialRunId, onBack }: { orgId: string;
 
       {loading ? <div className="loading">⟳ Loading…</div>
        : filtered.length === 0 ? <div className="empty" style={{ height: 160 }}><div className="ei">📋</div><div>No decisions found</div></div>
-       : <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+       : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {sortedPortfolios.map(([portKey, group]) => {
-            const allItems = [...group.negatives, ...group.harvest, ...group.pts]
-            const totalWasted = allItems.reduce((s, d) => s + (d.wasted_at_decision ?? 0), 0)
+            const allItems = Object.values(group.campaigns).flatMap(c => c.items)
+            const pendingCount = allItems.filter(d => d.status === 'pending').length
+            const actionedCount = allItems.filter(d => d.status === 'actioned').length
             return (
               <div key={portKey} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
                 {/* Portfolio header */}
                 <div style={{ padding: '10px 16px', background: 'var(--surface2)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: 14, fontWeight: 700 }}>{portKey}</span>
                   {group.brand && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>{group.brand}</span>}
-                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>{allItems.length} decisions</span>
-                  {group.negatives.length > 0 && <Badge color="#dc2626" bg="rgba(220,38,38,.08)">{group.negatives.length} negatives</Badge>}
-                  {group.harvest.length > 0 && <Badge color="#166534" bg="rgba(22,101,52,.08)">{group.harvest.length} harvest kw</Badge>}
-                  {group.pts.length > 0 && <Badge color="#7c3aed" bg="rgba(124,58,237,.08)">{group.pts.length} PT</Badge>}
-                  {totalWasted > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--mono)', color: '#dc2626', fontWeight: 700 }}>${totalWasted.toFixed(2)} wasted logged</span>}
+                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>{allItems.length} decisions · {Object.keys(group.campaigns).length} campaigns</span>
+                  {pendingCount > 0 && <Badge color="#b45309" bg="rgba(180,83,9,.08)">⏳ {pendingCount} pending</Badge>}
+                  {actionedCount > 0 && <Badge color="#166534" bg="rgba(22,101,52,.08)">✅ {actionedCount} actioned</Badge>}
+                  {group.totalWasted > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--mono)', color: '#dc2626', fontWeight: 700 }}>${group.totalWasted.toFixed(2)} wasted</span>}
                 </div>
-                {/* Decision rows */}
-                <div style={{ padding: '6px 0' }}>
-                  {allItems.map((d: any, i: number) => {
-                    const mtc  = MT_COLORS[d.match_type] ?? { color: '#6b7280', bg: 'rgba(107,114,128,.08)' }
-                    const isSel = selected.has(d.id)
-                    const isNeg = d.match_type?.startsWith('negative')
-                    return (
-                      <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 16px', background: isSel ? 'var(--accent-light)' : 'transparent', borderBottom: i < allItems.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                        <input type="checkbox" checked={isSel} onChange={() => setSelected(p => { const n = new Set(p); n.has(d.id) ? n.delete(d.id) : n.add(d.id); return n })} style={{ width: 14, height: 14, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
-                        <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700, minWidth: 180 }}>{d.term}</span>
-                        <Badge color={mtc.color} bg={mtc.bg}>{MT_LABELS[d.match_type] ?? d.match_type}</Badge>
-                        {d.is_generic_flag && <Badge color="#ea580c" bg="rgba(234,88,12,.1)">⚠️ Generic</Badge>}
-                        <span style={{ fontSize: 11, color: 'var(--text3)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                          {d.campaign_names?.length > 0 ? d.campaign_names.join(' · ') : ''}
-                        </span>
-                        {d.notes && <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>"{d.notes}"</span>}
-                        {(d.roas_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)', flexShrink: 0 }}>ROAS {d.roas_at_decision?.toFixed(2)}x</span>}
-                        {isNeg && (d.wasted_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: '#dc2626', fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>${d.wasted_at_decision?.toFixed(2)}</span>}
-                        {!isNeg && (d.purchases_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: '#166534', fontFamily: 'var(--mono)', flexShrink: 0 }}>{d.purchases_at_decision} orders</span>}
-                        <StatusPill status={d.status} />
-                        <span style={{ fontSize: 10, color: 'var(--text3)', minWidth: 44, textAlign: 'right' as const, flexShrink: 0 }}>{new Date(d.decided_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                {/* Campaign groups */}
+                {Object.entries(group.campaigns).map(([campKey, campGroup], ci) => {
+                  const campWasted = campGroup.items.reduce((s, d) => s + (d.wasted_at_decision ?? 0), 0)
+                  const campPending = campGroup.items.filter(d => d.status === 'pending').length
+                  return (
+                    <div key={campKey} style={{ borderBottom: ci < Object.keys(group.campaigns).length - 1 ? '1px solid var(--border)' : 'none' }}>
+                      {/* Campaign sub-header */}
+                      <div style={{ padding: '6px 16px 6px 20px', background: 'rgba(0,0,0,.02)', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--border)' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>📢 {campKey}</span>
+                        <span style={{ fontSize: 10, color: 'var(--text3)' }}>{campGroup.items.length} kw</span>
+                        {campPending > 0 && <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600 }}>⏳ {campPending} pending</span>}
+                        {campWasted > 0 && <span style={{ fontSize: 10, color: '#dc2626', fontFamily: 'var(--mono)', fontWeight: 600 }}>${campWasted.toFixed(2)}</span>}
                       </div>
-                    )
-                  })}
-                </div>
+                      {/* Keyword rows */}
+                      {campGroup.items.map((d: any, i: number) => {
+                        const mtc   = MT_COLORS[d.match_type] ?? { color: '#6b7280', bg: 'rgba(107,114,128,.08)' }
+                        const isSel = selected.has(d.id)
+                        const isNeg = d.match_type?.startsWith('negative')
+                        const st    = STATUS[d.status as keyof typeof STATUS]
+                        return (
+                          <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 16px 6px 32px', background: isSel ? 'var(--accent-light)' : 'transparent', borderBottom: i < campGroup.items.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                            <input type="checkbox" checked={isSel} onChange={() => setSelected(p => { const n = new Set(p); n.has(d.id) ? n.delete(d.id) : n.add(d.id); return n })} style={{ width: 13, height: 13, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
+                            <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, minWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{d.term}</span>
+                            <Badge color={mtc.color} bg={mtc.bg}>{MT_LABELS[d.match_type] ?? d.match_type}</Badge>
+                            {d.is_generic_flag && <Badge color="#ea580c" bg="rgba(234,88,12,.1)">⚠️</Badge>}
+                            <div style={{ flex: 1 }} />
+                            {d.notes && <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>"{d.notes}"</span>}
+                            {(d.roas_at_decision ?? 0) > 0 && <span style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', flexShrink: 0 }}>ROAS {d.roas_at_decision?.toFixed(1)}x</span>}
+                            {isNeg && (d.wasted_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: '#dc2626', fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>${d.wasted_at_decision?.toFixed(2)}</span>}
+                            {!isNeg && (d.purchases_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: '#166534', fontFamily: 'var(--mono)', flexShrink: 0 }}>{d.purchases_at_decision} orders</span>}
+                            <span style={{ fontSize: 10, flexShrink: 0, fontWeight: 600, color: st?.color ?? 'var(--text3)' }}>{st?.icon ?? '⏳'} {st?.label ?? d.status}</span>
+                            <span style={{ fontSize: 10, color: 'var(--text3)', minWidth: 40, textAlign: 'right' as const, flexShrink: 0 }}>{new Date(d.decided_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
               </div>
             )
           })}
