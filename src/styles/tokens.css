@@ -1,0 +1,164 @@
+/* ============================================================================
+   WARPFY DESIGN TOKENS
+   ----------------------------------------------------------------------------
+   Source of truth for the visual language. All components read from these
+   variables. Day 1 establishes the system; subsequent days apply it to each
+   module. Do not hardcode colors or spacing anywhere downstream.
+   ============================================================================ */
+
+:root {
+  /* ── COLOR · SURFACES (dark by default) ─────────────────────────────────── */
+  --bg:              #0A0B0D;   /* app background */
+  --surface:         #101114;   /* cards, panels */
+  --surface-2:       #17181C;   /* nested panels, hover */
+  --surface-3:       #1E1F25;   /* pressed, selected */
+  --surface-raised:  #1A1B20;   /* popovers, dropdowns */
+
+  /* Compatibility aliases (match existing --surface, --surface2, --surface3) */
+  --surface2:        var(--surface-2);
+  --surface3:        var(--surface-3);
+
+  /* ── COLOR · TEXT ───────────────────────────────────────────────────────── */
+  --text:            #E8E9ED;   /* primary */
+  --text-2:          #A8ABB4;   /* secondary */
+  --text-3:          #6E7179;   /* tertiary / metadata */
+  --text-4:          #44474E;   /* disabled */
+  --text3:           var(--text-3);  /* compat alias */
+
+  /* ── COLOR · BORDERS ────────────────────────────────────────────────────── */
+  --border:          #23252B;
+  --border-strong:   #2E3038;
+  --border-subtle:   #191A1F;
+
+  /* ── COLOR · ACCENT (electric blue) ─────────────────────────────────────── */
+  --accent:          #3B82F6;
+  --accent-hover:    #2563EB;
+  --accent-pressed:  #1D4ED8;
+  --accent-tint:     rgba(59, 130, 246, 0.12);
+  --accent-tint-2:   rgba(59, 130, 246, 0.24);
+  --accent-glow:     rgba(59, 130, 246, 0.35);
+  --accent-light:    var(--accent-tint);  /* compat alias */
+
+  /* ── COLOR · SEMANTIC ───────────────────────────────────────────────────── */
+  --success:         #10B981;
+  --success-tint:    rgba(16, 185, 129, 0.12);
+  --warning:         #F59E0B;
+  --warning-tint:    rgba(245, 158, 11, 0.12);
+  --danger:          #EF4444;
+  --danger-tint:     rgba(239, 68, 68, 0.12);
+  --info:            var(--accent);
+
+  /* Compat aliases for existing code */
+  --red:             var(--danger);
+  --green:           var(--success);
+
+  /* ── COLOR · BRAND DOTS (used in sidebar brand filter) ──────────────────── */
+  --brand-eco-living:      #22C55E;
+  --brand-fine-living:     #8B5CF6;
+  --brand-zero-jet-lag:    #06B6D4;
+  --brand-kesol:           #F59E0B;
+  --brand-well-lean:       #EC4899;
+
+  /* ── TYPOGRAPHY ─────────────────────────────────────────────────────────── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+  --mono:      var(--font-mono);   /* compat alias */
+
+  /* Type scale — tight, data-dense */
+  --text-xs:   11px;   /* metadata, badges */
+  --text-sm:   12px;   /* body, tables */
+  --text-base: 13px;   /* default UI */
+  --text-md:   14px;   /* emphasized body */
+  --text-lg:   16px;   /* section titles */
+  --text-xl:   20px;   /* page titles */
+  --text-2xl:  24px;   /* hero numbers */
+  --text-3xl:  32px;   /* landing headers */
+
+  /* Line heights */
+  --leading-tight:  1.2;
+  --leading-normal: 1.45;
+  --leading-relaxed: 1.6;
+
+  /* Weights */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* ── SPACING ────────────────────────────────────────────────────────────── */
+  --space-0:  0;
+  --space-1:  2px;
+  --space-2:  4px;
+  --space-3:  6px;
+  --space-4:  8px;
+  --space-5:  12px;
+  --space-6:  16px;
+  --space-7:  20px;
+  --space-8:  24px;
+  --space-9:  32px;
+  --space-10: 40px;
+  --space-11: 48px;
+  --space-12: 64px;
+
+  /* ── RADII ──────────────────────────────────────────────────────────────── */
+  --radius-xs:   3px;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:   12px;
+  --radius-2xl:  16px;
+  --radius-full: 9999px;
+
+  /* ── ELEVATION (shadows on dark are subtle) ─────────────────────────────── */
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg:  0 12px 32px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border);
+  --shadow-accent:  0 0 0 3px var(--accent-tint);
+
+  /* ── MOTION ─────────────────────────────────────────────────────────────── */
+  --ease:          cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast:   120ms;
+  --duration-normal: 180ms;
+  --duration-slow:   260ms;
+
+  /* ── LAYOUT ─────────────────────────────────────────────────────────────── */
+  --sidebar-width:    236px;
+  --topbar-height:    48px;
+  --content-max:      1440px;
+}
+
+/* ============================================================================
+   GLOBAL BASE STYLES (applied to html/body for consistency)
+   ============================================================================ */
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+}
+
+/* Monospace for anything tabular or numeric */
+.mono, .tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-tint-2);
+  color: var(--text);
+}
+
+/* Scrollbars (WebKit) — subtle, on-theme */
+::-webkit-scrollbar          { width: 10px; height: 10px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: var(--surface-3); border-radius: var(--radius-full); border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
