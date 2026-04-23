@@ -52,8 +52,8 @@ function BulkApplyPanel({ rows, onSave, onClose }: {
         </div>
         <div style={{ padding: 20 }}>
           {[
-            { label: 'S — Seasonality',   val: sVal, set: setSVal, color: '#1a4a8c' },
-            { label: 'K — Search Trend',   val: kVal, set: setKVal, color: '#8a6a00' },
+            { label: 'S — Seasonality',   val: sVal, set: setSVal, color: '#60A5FA' },
+            { label: 'K — Search Trend',   val: kVal, set: setKVal, color: '#FBBF24' },
             { label: 'T — Team Push',      val: tVal, set: setTVal, color: 'var(--accent)' },
           ].map(m => (
             <div key={m.label} style={{ marginBottom: 16 }}>
@@ -148,8 +148,8 @@ function BulkEditPanel({ rows, velocities, onSave, onClose }: {
               <tr style={{ background: 'var(--surface3)', position: 'sticky', top: 0, zIndex: 1 }}>
                 <th style={{ padding: '8px 14px', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.07em', color: 'var(--text3)', textAlign: 'left', borderBottom: '2px solid var(--border2)' }}>Product</th>
                 {[
-                  { key: 's', label: 'S Seasonality', color: '#1a4a8c' },
-                  { key: 'k', label: 'K Search Trend', color: '#8a6a00' },
+                  { key: 's', label: 'S Seasonality', color: '#60A5FA' },
+                  { key: 'k', label: 'K Search Trend', color: '#FBBF24' },
                   { key: 't', label: 'T Team Push', color: 'var(--accent)' },
                 ].map(col => (
                   <th key={col.key} style={{ padding: '8px 14px', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.07em', color: col.color, textAlign: 'center', borderBottom: '2px solid var(--border2)', whiteSpace: 'nowrap' }}>{col.label}</th>
@@ -164,7 +164,7 @@ function BulkEditPanel({ rows, velocities, onSave, onClose }: {
                     <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', marginTop: 1 }}>{e.asin}</div>
                   </td>
                   {(['s', 'k', 't'] as const).map(field => {
-                    const colors = { s: '#1a4a8c', k: '#8a6a00', t: 'var(--accent)' }
+                    const colors = { s: '#60A5FA', k: '#FBBF24', t: 'var(--accent)' }
                     const color = colors[field]
                     return (
                       <td key={field} style={{ padding: '8px 14px', textAlign: 'center' }}>
@@ -393,9 +393,9 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
               {[
                 { label: 'Total ASINs',    value: kpis.total,                       color: 'var(--text)',   bg: 'var(--surface)' },
-                { label: 'Critical',       value: kpis.critical,                    color: '#c0392b',       bg: '#fdf0ee' },
-                { label: 'Order Soon',     value: kpis.orderSoon,                   color: '#c06b00',       bg: '#fff3e0' },
-                { label: 'Watch',          value: kpis.watch,                       color: '#1a4a8c',       bg: '#eef3fb' },
+                { label: 'Critical',       value: kpis.critical,                    color: '#F87171',       bg: 'rgba(239,68,68,.1)' },
+                { label: 'Order Soon',     value: kpis.orderSoon,                   color: '#FBBF24',       bg: 'rgba(245,158,11,.1)' },
+                { label: 'Watch',          value: kpis.watch,                       color: '#60A5FA',       bg: 'rgba(59,130,246,.1)' },
                 { label: 'Avg Coverage',   value: fmtDays(kpis.avgCoverage),        color: 'var(--accent)', bg: 'var(--surface)' },
                 { label: 'Units to Order', value: fmtUnits(kpis.totalUnitsToOrder), color: 'var(--text)',   bg: 'var(--surface)' },
                 { label: 'Est. PO Value',  value: fmtCost(kpis.totalCost),          color: 'var(--accent)', bg: 'var(--surface)' },
@@ -520,20 +520,20 @@ export default function InventoryDashboard({ userEmail }: { userEmail: string })
                           <td style={{ padding: '10px 10px' }}>
                             <div style={{ display: 'flex', gap: 3 }}>
                               {[
-                                { label: 'S', val: vel?.seasonality_multiplier ?? 1,  title: 'Seasonality',  color1: '#1a4a8c' },
-                                { label: 'K', val: vel?.search_trend_multiplier ?? 1, title: 'Search Trend', color1: '#8a6a00' },
+                                { label: 'S', val: vel?.seasonality_multiplier ?? 1,  title: 'Seasonality',  color1: '#60A5FA' },
+                                { label: 'K', val: vel?.search_trend_multiplier ?? 1, title: 'Search Trend', color1: '#FBBF24' },
                                 { label: 'T', val: a.team_push_multiplier ?? 1,       title: 'Team Push',    color1: 'var(--accent)' },
                               ].map(m => (
                                 <span key={m.label} title={`${m.title}: ${m.val}x`} style={{
                                   fontSize: 10, padding: '1px 5px', borderRadius: 3,
-                                  background: m.val > 1 ? 'var(--accent-light)' : m.val < 1 ? '#fdf0ee' : 'var(--surface3)',
-                                  color: m.val > 1 ? m.color1 : m.val < 1 ? '#c0392b' : 'var(--text3)',
+                                  background: m.val > 1 ? 'var(--accent-light)' : m.val < 1 ? 'rgba(239,68,68,.1)' : 'var(--surface3)',
+                                  color: m.val > 1 ? m.color1 : m.val < 1 ? '#F87171' : 'var(--text3)',
                                   fontFamily: 'var(--mono)',
                                 }}>{m.label}×{m.val.toFixed(2)}</span>
                               ))}
                             </div>
                           </td>
-                          <td style={{ padding: '10px 10px', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: (plan?.units_to_order ?? 0) > 0 ? '#c06b00' : 'var(--text3)' }}>
+                          <td style={{ padding: '10px 10px', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 500, color: (plan?.units_to_order ?? 0) > 0 ? '#FBBF24' : 'var(--text3)' }}>
                             {(plan?.units_to_order ?? 0) > 0 ? fmtUnits(plan!.units_to_order) : '—'}
                           </td>
                           <td style={{ padding: '10px 10px', fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--accent)' }}>

@@ -1,0 +1,100 @@
+/* ============================================================================
+   PPC Polish — Day 3
+   ----------------------------------------------------------------------------
+   CSS-level refinements for the PPC module that can't be achieved via inline
+   styles inside PPCDashboard.tsx. Loaded globally; selectors are scoped to
+   the existing structure so they don't affect other modules.
+   ============================================================================ */
+
+/* Softer scrollbar specifically inside PPC portfolio sidebar */
+.ppc-portfolio-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+/* Tabulate all numeric values in the PPC module (currency, ROAS, orders) */
+[data-ppc-root] .mono,
+[data-ppc-root] [style*="font-family: var(--mono)"] {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Give inline-styled card surfaces consistent hover feedback */
+[data-ppc-root] .ppc-card:hover {
+  border-color: var(--border2) !important;
+  transition: border-color 180ms ease;
+}
+
+/* ============================================================================
+   GENERAL DARK-THEME REFINEMENTS — these affect all modules but are
+   specifically here because Day 2 couldn't reach inline styled elements.
+
+   Inline-styled bordered panels in the app use colors that look fine
+   on the dark theme now, but their backgrounds were sometimes too close
+   to the surface color. These utility classes can be added by modules.
+   ============================================================================ */
+
+.wfy-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: border-color 180ms ease;
+}
+.wfy-card:hover { border-color: var(--border2); }
+.wfy-card.is-interactive { cursor: pointer; }
+.wfy-card.is-interactive:hover { border-color: var(--accent); }
+
+.wfy-stat {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 14px 16px;
+}
+.wfy-stat-label {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text3);
+}
+.wfy-stat-value {
+  font-family: var(--mono);
+  font-size: 22px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+}
+.wfy-stat-value.is-accent  { color: var(--accent); }
+.wfy-stat-value.is-warning { color: #FBBF24; }
+.wfy-stat-value.is-danger  { color: #F87171; }
+.wfy-stat-value.is-success { color: #34D399; }
+.wfy-stat-meta {
+  font-size: 11px; color: var(--text3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================================
+   Tabular data tables across modules — consistent hover, monospace numerics
+   ============================================================================ */
+table.wfy-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+table.wfy-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+table.wfy-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+}
+table.wfy-table tr:hover td { background: var(--surface); }
+table.wfy-table td.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

@@ -23,10 +23,10 @@ type Health     = 'red' | 'amber' | 'green'
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const STATUS: Record<string, { label: string; icon: string; color: string; bg: string; border: string }> = {
-  pending:       { label: 'Pending review',     icon: '⏳', color: '#b45309', bg: 'rgba(180,83,9,.08)',    border: 'rgba(180,83,9,.2)'    },
-  actioned:      { label: 'Actioned in Amazon', icon: '✅', color: '#166534', bg: 'rgba(22,101,52,.08)',   border: 'rgba(22,101,52,.2)'   },
-  not_actioning: { label: 'Not actioning',      icon: '⏸', color: '#6b7280', bg: 'rgba(107,114,128,.08)', border: 'rgba(107,114,128,.2)' },
-  reversed:      { label: 'Reversed',           icon: '↩️', color: '#dc2626', bg: 'rgba(220,38,38,.08)',   border: 'rgba(220,38,38,.2)'   },
+  pending:       { label: 'Pending review',     icon: '⏳', color: '#FBBF24', bg: 'rgba(245,158,11,.12)',  border: 'rgba(245,158,11,.25)' },
+  actioned:      { label: 'Actioned in Amazon', icon: '✅', color: '#34D399', bg: 'rgba(16,185,129,.12)',  border: 'rgba(16,185,129,.25)' },
+  not_actioning: { label: 'Not actioning',      icon: '⏸', color: '#9CA3AF', bg: 'rgba(156,163,175,.1)',  border: 'rgba(156,163,175,.2)' },
+  reversed:      { label: 'Reversed',           icon: '↩️', color: '#F87171', bg: 'rgba(239,68,68,.12)',   border: 'rgba(239,68,68,.25)'  },
 }
 const MT_LABELS: Record<string, string> = {
   negative_phrase: 'Neg · Phrase', negative_exact: 'Neg · Exact',
@@ -34,18 +34,18 @@ const MT_LABELS: Record<string, string> = {
   harvest_phrase: 'Harvest · Phrase', harvest_broad: 'Harvest · Broad', harvest_pt: 'Harvest · PT',
 }
 const MT_COLORS: Record<string, { color: string; bg: string }> = {
-  negative_phrase: { color: '#dc2626', bg: 'rgba(220,38,38,.1)'  },
-  negative_exact:  { color: '#b91c1c', bg: 'rgba(185,28,28,.08)' },
-  negative_pt:     { color: '#7c3aed', bg: 'rgba(124,58,237,.08)'},
-  harvest_exact:   { color: '#166534', bg: 'rgba(22,101,52,.1)'  },
-  harvest_phrase:  { color: '#166534', bg: 'rgba(22,101,52,.08)' },
-  harvest_broad:   { color: '#1d4ed8', bg: 'rgba(29,78,216,.08)' },
-  harvest_pt:      { color: '#0f766e', bg: 'rgba(15,118,110,.08)'},
+  negative_phrase: { color: '#F87171', bg: 'rgba(239,68,68,.12)'  },
+  negative_exact:  { color: '#FCA5A5', bg: 'rgba(239,68,68,.1)'   },
+  negative_pt:     { color: '#C4B5FD', bg: 'rgba(139,92,246,.12)' },
+  harvest_exact:   { color: '#34D399', bg: 'rgba(16,185,129,.12)' },
+  harvest_phrase:  { color: '#6EE7B7', bg: 'rgba(16,185,129,.1)'  },
+  harvest_broad:   { color: '#60A5FA', bg: 'rgba(59,130,246,.12)' },
+  harvest_pt:      { color: '#2DD4BF', bg: 'rgba(20,184,166,.12)' },
 }
 const HEALTH_COLORS: Record<Health, { dot: string; bg: string; text: string; border: string }> = {
-  red:   { dot: '#dc2626', bg: 'rgba(220,38,38,.08)',   text: '#dc2626', border: 'rgba(220,38,38,.2)'   },
-  amber: { dot: '#d97706', bg: 'rgba(217,119,6,.08)',   text: '#b45309', border: 'rgba(217,119,6,.2)'   },
-  green: { dot: '#16a34a', bg: 'rgba(22,163,74,.08)',   text: '#166534', border: 'rgba(22,163,74,.2)'   },
+  red:   { dot: '#F87171', bg: 'rgba(239,68,68,.1)',   text: '#F87171', border: 'rgba(239,68,68,.25)'  },
+  amber: { dot: '#FBBF24', bg: 'rgba(245,158,11,.1)',  text: '#FBBF24', border: 'rgba(245,158,11,.25)' },
+  green: { dot: '#34D399', bg: 'rgba(16,185,129,.1)',  text: '#34D399', border: 'rgba(16,185,129,.25)' },
 }
 const CAMPAIGN_TYPES = ['auto', 'broad', 'exact', 'phrase', 'other']
 const DATE_RANGES = [
@@ -99,8 +99,8 @@ function CampButtons({ campaigns, selected, recommendedScope, campBreakdown, onU
         const spendStr = bd ? '$' + bd.spend.toFixed(2) : ''
         const roasStr  = bd ? 'ROAS ' + bd.roas.toFixed(2) + 'x' : ''
         const tooltip  = [c, [spendStr, roasStr].filter(Boolean).join(' · '), isRec ? 'ROAS < 1.0 — negate here' : 'converting — leave alone'].filter(Boolean).join(' — ')
-        const bg     = inList ? (isRec ? '#dc2626' : 'var(--accent)') : 'var(--surface2)'
-        const color  = inList ? '#fff' : isRec ? '#dc2626' : 'var(--text3)'
+        const bg     = inList ? (isRec ? '#F87171' : 'var(--accent)') : 'var(--surface2)'
+        const color  = inList ? '#fff' : isRec ? '#F87171' : 'var(--text3)'
         const border = inList ? (isRec ? '1.5px solid #dc2626' : '1.5px solid var(--accent)') : isRec ? '1.5px dashed #dc2626' : '1px solid var(--border)'
         return (
           <button key={c} title={tooltip}
@@ -152,9 +152,9 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
           style={{ width: 15, height: 15, accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }} />
         <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700 }}>{isExact ? row.search_term : row.ngram}</span>
         {!isExact && row.ngram_type && <span style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{row.ngram_type}</span>}
-        {isExact && row.coverage !== 'Not covered' && <Badge color="#166534" bg="rgba(22,101,52,.1)">{row.coverage === 'Covered by phrase' ? '✓ Covered' : '⚡ Partial'}</Badge>}
+        {isExact && row.coverage !== 'Not covered' && <Badge color="#166534" bg="rgba(16,185,129,.12)">{row.coverage === 'Covered by phrase' ? '✓ Covered' : '⚡ Partial'}</Badge>}
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', fontFamily: 'var(--mono)' }}>${wasted.toFixed(2)} wasted</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#F87171', fontFamily: 'var(--mono)' }}>${wasted.toFixed(2)} wasted</span>
         {(row.roas ?? 0) > 0 && <span style={{ fontSize: 11, color: 'var(--text3)' }}>ROAS {row.roas?.toFixed(2)}x</span>}
         <span style={{ fontSize: 11, color: 'var(--text3)' }}>ACOS {row.acos?.toFixed(1)}%</span>
         {(row.clicks ?? 0) > 0 && <span style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{row.clicks} clicks</span>}
@@ -170,9 +170,9 @@ function NegRow({ row, keyStr, selected, decision, onToggle, onUpdate, campaigns
         </div>
         <div>
           <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>
-            Apply to campaigns <span style={{ color: '#dc2626', fontWeight: 400, textTransform: 'none' as const }}>— red = recommended</span>
-            {row.negate_broad_auto && !isExact && <span style={{ marginLeft: 8, color: '#7c3aed', fontWeight: 600 }}>Phrase neg in Broad/Auto</span>}
-            {row.negate_exact && !isExact && <span style={{ marginLeft: 8, color: '#0f766e', fontWeight: 600 }}>Exact neg in Exact campaigns</span>}
+            Apply to campaigns <span style={{ color: '#F87171', fontWeight: 400, textTransform: 'none' as const }}>— red = recommended</span>
+            {row.negate_broad_auto && !isExact && <span style={{ marginLeft: 8, color: '#C4B5FD', fontWeight: 600 }}>Phrase neg in Broad/Auto</span>}
+            {row.negate_exact && !isExact && <span style={{ marginLeft: 8, color: '#2DD4BF', fontWeight: 600 }}>Exact neg in Exact campaigns</span>}
           </div>
           <CampButtons campaigns={campaigns} selected={d.campaigns} recommendedScope={row.recommended_scope}
             campBreakdown={row.camp_breakdown}
@@ -201,7 +201,7 @@ function PTNegRow({ row, keyStr, selected, decision, onToggle, onUpdate }: any) 
         <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700 }}>{row.pt_expression}</span>
         <Badge color="#7c3aed" bg="rgba(124,58,237,.1)">{row.pt_expression?.startsWith('asin=') ? 'ASIN target' : 'Match type'}</Badge>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', fontFamily: 'var(--mono)' }}>${row.total_spend?.toFixed(2)} spend</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#F87171', fontFamily: 'var(--mono)' }}>${row.total_spend?.toFixed(2)} spend</span>
         <span style={{ fontSize: 11, color: 'var(--text3)' }}>ROAS {row.roas?.toFixed(2)}x</span>
       </div>
       <div style={{ paddingLeft: 25, marginTop: 6 }}>
@@ -212,7 +212,7 @@ function PTNegRow({ row, keyStr, selected, decision, onToggle, onUpdate }: any) 
               <span key={c.name} style={{ fontSize: 11, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 8px' }}>
                 <span style={{ fontWeight: 600 }}>{c.name}</span>
                 <span style={{ color: 'var(--text3)', marginLeft: 6 }}>${c.spend.toFixed(2)} · ROAS {c.roas.toFixed(2)}x</span>
-                {c.roas < 1.0 && c.spend >= 10 && <span style={{ color: '#dc2626', marginLeft: 4, fontWeight: 600 }}>← exclude here</span>}
+                {c.roas < 1.0 && c.spend >= 10 && <span style={{ color: '#F87171', marginLeft: 4, fontWeight: 600 }}>← exclude here</span>}
                 {c.roas < 1.0 && c.spend < 10 && <span style={{ color: 'var(--text3)', marginLeft: 4, fontSize: 10 }}>low spend</span>}
               </span>
             ))}
@@ -252,7 +252,7 @@ function HarvestRow({ row, selectedKeys, onToggle }: any) {
             <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700 }}>{row.search_term}</span>
             <span style={{ fontSize: 11, color: 'var(--text3)' }}>{row.confidence}</span>
             {row.generic_flag && <Badge color="#ea580c" bg="rgba(234,88,12,.1)">{row.generic_flag}</Badge>}
-            <Badge color={row.existing_targeting?.startsWith('🆕') ? '#166534' : '#b45309'} bg={row.existing_targeting?.startsWith('🆕') ? 'rgba(22,101,52,.08)' : 'rgba(180,83,9,.08)'}>{row.existing_targeting}</Badge>
+            <Badge color={row.existing_targeting?.startsWith('🆕') ? '#34D399' : '#FBBF24'} bg={row.existing_targeting?.startsWith('🆕') ? 'rgba(16,185,129,.1)' : 'rgba(245,158,11,.12)'}>{row.existing_targeting}</Badge>
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' as const }}>
             <span style={{ fontSize: 11, color: 'var(--text3)' }}>{row.purchases} orders</span>
@@ -286,7 +286,7 @@ function HarvestPTRow({ row, selectedKeys, onToggle }: any) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const, marginBottom: 4 }}>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 700 }}>{row.pt_expression}</span>
             <span style={{ fontSize: 11, color: 'var(--text3)' }}>{row.confidence}</span>
-            <Badge color="#0f766e" bg="rgba(15,118,110,.08)">{row.pt_expression?.startsWith('asin=') ? 'ASIN target' : 'Match type'}</Badge>
+            <Badge color="#0f766e" bg="rgba(20,184,166,.12)">{row.pt_expression?.startsWith('asin=') ? 'ASIN target' : 'Match type'}</Badge>
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' as const, marginBottom: 4 }}>
             <span style={{ fontSize: 11, color: 'var(--text3)' }}>{row.orders} orders</span>
@@ -324,9 +324,9 @@ function NGramTable({ rows, label }: { rows: any[]; label: string }) {
               <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)', fontWeight: 600 }}>{row.ngram}</td>
               <td style={{ padding: '7px 10px', color: 'var(--text3)' }}>{row.appearances}</td>
               <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)' }}>${row.total_cost?.toFixed(2)}</td>
-              <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)', color: hi ? '#dc2626' : 'var(--text)', fontWeight: hi ? 600 : 400 }}>${row.wasted_spend?.toFixed(2)}</td>
+              <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)', color: hi ? '#F87171' : 'var(--text)', fontWeight: hi ? 600 : 400 }}>${row.wasted_spend?.toFixed(2)}</td>
               <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)' }}>${row.total_sales?.toFixed(2)}</td>
-              <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)', fontWeight: 600, color: row.roas >= 3 ? 'var(--accent)' : row.roas < 1 ? '#dc2626' : 'var(--text)' }}>{row.roas?.toFixed(2)}x</td>
+              <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)', fontWeight: 600, color: row.roas >= 3 ? 'var(--accent)' : row.roas < 1 ? '#F87171' : 'var(--text)' }}>{row.roas?.toFixed(2)}x</td>
               <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)' }}>{row.acos?.toFixed(1)}%</td>
               <td style={{ padding: '7px 10px', fontFamily: 'var(--mono)' }}>{(row.waste_pct * 100)?.toFixed(1)}%</td>
             </tr>
@@ -448,7 +448,7 @@ function PortfolioSelectorView({ portfolioSummary, selected, onSelect, onConfirm
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                   <span style={{ fontSize: 13, fontWeight: isSelected ? 600 : 400 }}>{p.name}</span>
-                  {isDone && <span style={{ fontSize: 10, color: '#166534', background: 'rgba(22,101,52,.1)', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>✓ Done</span>}
+                  {isDone && <span style={{ fontSize: 10, color: '#34D399', background: 'rgba(16,185,129,.12)', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>✓ Done</span>}
                 </div>
                 <div style={{ background: 'var(--surface2)', borderRadius: 3, height: 4, overflow: 'hidden' }}>
                   <div style={{ width: `${pct}%`, height: '100%', background: isSelected ? 'var(--accent)' : 'var(--border)', borderRadius: 3 }} />
@@ -568,7 +568,7 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
       </div>
 
       {bulkDetected && (
-        <div style={{ background: 'rgba(22,101,52,.08)', border: '1px solid rgba(22,101,52,.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: '#166534', fontWeight: 600 }}>
+        <div style={{ background: 'rgba(16,185,129,.1)', border: '1px solid rgba(16,185,129,.28)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: '#34D399', fontWeight: 600 }}>
           ✅ Bulk file detected — will analyse all portfolios automatically
         </div>
       )}
@@ -641,7 +641,7 @@ function UploadView({ brands, orgId, onDone }: { brands: string[]; orgId: string
       </div>
 
       {error && (
-        <div style={{ background: 'rgba(220,38,38,.08)', border: '1px solid rgba(220,38,38,.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#dc2626' }}>
+        <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.28)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#F87171' }}>
           ⚠️ {error}
           {duplicateUploadId && (
             <div style={{ marginTop: 8 }}>
@@ -1017,7 +1017,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: hc.dot, flexShrink: 0, marginLeft: 6 }} />
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-                  {p.high_negatives > 0 && <span style={{ fontSize: 10, color: '#dc2626', fontWeight: 600 }}>{p.high_negatives} HIGH</span>}
+                  {p.high_negatives > 0 && <span style={{ fontSize: 10, color: '#F87171', fontWeight: 600 }}>{p.high_negatives} HIGH</span>}
                   <span style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)' }}>${(p.total_wasted ?? 0).toFixed(0)} wasted</span>
                 </div>
               </div>
@@ -1084,7 +1084,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                 <span style={{ fontSize: 12, color: 'var(--text3)' }}>${prevRun.total_spend?.toFixed(2)} · {prevRun.high_negatives} HIGH</span>
               </div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                {prevDecs.filter(d => d.status === 'actioned').length > 0 && <Badge color="#166534" bg="rgba(22,101,52,.1)">✅ {prevDecs.filter(d=>d.status==='actioned').length} actioned</Badge>}
+                {prevDecs.filter(d => d.status === 'actioned').length > 0 && <Badge color="#166534" bg="rgba(16,185,129,.12)">✅ {prevDecs.filter(d=>d.status==='actioned').length} actioned</Badge>}
                 {prevDecs.filter(d => d.status === 'not_actioning').length > 0 && <Badge color="#6b7280" bg="rgba(107,114,128,.1)">⏸ {prevDecs.filter(d=>d.status==='not_actioning').length} skipped</Badge>}
                 <span style={{ fontSize: 12, color: 'var(--text3)', transition: 'transform .15s', transform: histExp ? 'rotate(180deg)' : 'none' }}>▾</span>
               </div>
@@ -1092,7 +1092,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
             {histExp && prevDecs.length > 0 && (
               <div style={{ borderTop: '1px solid rgba(29,78,216,.15)', padding: '10px 14px' }}>
                 {prevDecs.map((d, i) => {
-                  const mtc = MT_COLORS[d.match_type] ?? { color: '#6b7280', bg: 'rgba(107,114,128,.08)' }
+                  const mtc = MT_COLORS[d.match_type] ?? { color: '#9CA3AF', bg: 'rgba(156,163,175,.1)' }
                   const st  = STATUS[d.status]
                   return <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: i < prevDecs.length-1 ? '1px solid var(--border)' : 'none' }}>
                     <span style={{ flexShrink: 0 }}>{st?.icon ?? '⏳'}</span>
@@ -1131,9 +1131,9 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                     {campTableRows.map(([name, v], i) => (
                       <tr key={name} style={{ borderBottom: i < campTableRows.length - 1 ? '1px solid var(--border)' : 'none' }}>
                         <td style={{ padding: '7px 12px', fontWeight: 500, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{name}</td>
-                        <td style={{ padding: '7px 12px', fontFamily: 'var(--mono)', color: v.wasted > 0 ? '#dc2626' : 'var(--text3)', fontWeight: v.wasted > 0 ? 700 : 400 }}>${v.wasted.toFixed(2)}</td>
-                        <td style={{ padding: '7px 12px' }}>{v.high > 0 ? <span style={{ color: '#dc2626', fontWeight: 700 }}>{v.high} HIGH</span> : <span style={{ color: 'var(--text3)' }}>—</span>}</td>
-                        <td style={{ padding: '7px 12px', fontSize: 11, color: v.wasted > 20 ? '#dc2626' : 'var(--text3)' }}>
+                        <td style={{ padding: '7px 12px', fontFamily: 'var(--mono)', color: v.wasted > 0 ? '#F87171' : 'var(--text3)', fontWeight: v.wasted > 0 ? 700 : 400 }}>${v.wasted.toFixed(2)}</td>
+                        <td style={{ padding: '7px 12px' }}>{v.high > 0 ? <span style={{ color: '#F87171', fontWeight: 700 }}>{v.high} HIGH</span> : <span style={{ color: 'var(--text3)' }}>—</span>}</td>
+                        <td style={{ padding: '7px 12px', fontSize: 11, color: v.wasted > 20 ? '#F87171' : 'var(--text3)' }}>
                           {v.wasted > 20 ? '⚠️ Negate terms in this campaign' : v.wasted > 0 ? 'Review negatives' : '✅ Clean'}
                         </td>
                       </tr>
@@ -1147,7 +1147,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
         {/* Clickable insight cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 14 }}>
           {([
-            { icon:'🔴', label:`${(portData.phrase_high?.length??0)+(portData.exact_negatives?.length??0)} kw negatives`,  sub:'Keyword terms to negate',       tab:'kw_neg'     as Tab, bg:'rgba(220,38,38,.06)', border:'rgba(220,38,38,.2)'   },
+            { icon:'🔴', label:`${(portData.phrase_high?.length??0)+(portData.exact_negatives?.length??0)} kw negatives`,  sub:'Keyword terms to negate',       tab:'kw_neg'     as Tab, bg:'rgba(220,38,38,.06)', border:'rgba(239,68,68,.22)'   },
             { icon:'🟣', label:`${portData.pt_negatives?.length??0} PT negatives`,       sub:'Product targets to exclude',   tab:'pt_neg'     as Tab, bg:'rgba(124,58,237,.06)', border:'rgba(124,58,237,.2)' },
             { icon:'🚀', label:`${portData.harvest_candidates?.length??0} harvest kw`,   sub:'Keywords to push',             tab:'harvest_kw' as Tab, bg:'rgba(22,101,52,.06)',  border:'rgba(22,101,52,.2)'  },
             { icon:'🎯', label:`${portData.pt_harvest?.length??0} harvest PT`,           sub:'ASIN targets to expand',       tab:'harvest_pt' as Tab, bg:'rgba(15,118,110,.06)', border:'rgba(15,118,110,.2)' },
@@ -1165,7 +1165,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
 
         {/* Toast / error */}
         {toast && <div style={{ background: 'var(--accent-light)', border: '1px solid var(--accent)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>{toast} {runId && <button onClick={() => onGoDecisions(runId!)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', textDecoration: 'underline', fontSize: 13, padding: 0 }}>View decisions log →</button>}</div>}
-        {saveError && <div style={{ background: 'rgba(220,38,38,.08)', border: '1px solid rgba(220,38,38,.3)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#dc2626' }}>⚠️ {saveError}</div>}
+        {saveError && <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.28)', borderRadius: 8, padding: '10px 14px', marginBottom: 12, fontSize: 13, color: '#F87171' }}>⚠️ {saveError}</div>}
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 2, background: 'var(--surface2)', borderRadius: 8, padding: 3, marginBottom: 14, width: 'fit-content' }}>
@@ -1192,13 +1192,13 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
               return (
                 <div style={{ background: 'rgba(22,101,52,.04)', border: '1px solid rgba(22,101,52,.2)', borderRadius: 8, padding: '8px 14px', marginBottom: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#166534', flexShrink: 0 }}>🛡 Protected</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#34D399', flexShrink: 0 }}>🛡 Protected</span>
                     <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>— click ✕ to unprotect (will appear as negative candidate):</span>
                     {activeCore.map((w: string) => (
-                      <span key={w} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--mono)', background: 'rgba(22,101,52,.1)', color: '#166534', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>
+                      <span key={w} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--mono)', background: 'rgba(16,185,129,.12)', color: '#34D399', borderRadius: 4, padding: '1px 6px', fontWeight: 600 }}>
                         {w}
                         <button onClick={() => setRemovedCore(p => { const n = new Set(p); n.add(w); return n })}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#166534', fontSize: 10, padding: 0, lineHeight: 1, opacity: 0.7, marginLeft: 1 }} title="Remove from protected list">✕</button>
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#34D399', fontSize: 10, padding: 0, lineHeight: 1, opacity: 0.7, marginLeft: 1 }} title="Remove from protected list">✕</button>
                       </span>
                     ))}
                   </div>
@@ -1206,10 +1206,10 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' as const }}>
                       <span style={{ fontSize: 10, color: 'var(--text3)', flexShrink: 0 }}>Unprotected (may now appear as negatives):</span>
                       {removedList.map((w: string) => (
-                        <span key={w} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--mono)', background: 'rgba(220,38,38,.08)', color: '#dc2626', borderRadius: 4, padding: '1px 6px', textDecoration: 'line-through', opacity: 0.7 }}>
+                        <span key={w} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontFamily: 'var(--mono)', background: 'rgba(239,68,68,.1)', color: '#F87171', borderRadius: 4, padding: '1px 6px', textDecoration: 'line-through', opacity: 0.7 }}>
                           {w}
                           <button onClick={() => setRemovedCore(p => { const n = new Set(p); n.delete(w); return n })}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: 10, padding: 0, lineHeight: 1, marginLeft: 1 }} title="Re-add to protected list">↩</button>
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#F87171', fontSize: 10, padding: 0, lineHeight: 1, marginLeft: 1 }} title="Re-add to protected list">↩</button>
                         </span>
                       ))}
                     </div>
@@ -1241,7 +1241,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <SectionTitle label="HIGH priority phrase negatives" sub="ROAS < 1.0 or ACOS > 100% · negate now" color="#dc2626" />
                   <button onClick={() => portData.phrase_high.forEach((r: any) => { if (!selected.has(`neg_phrase_${r.ngram}`)) toggle(`neg_phrase_${r.ngram}`, r.recommended_scope?.split(', ')) })}
-                    style={{ fontSize: 11, background: 'rgba(220,38,38,.1)', color: '#dc2626', border: '1px solid rgba(220,38,38,.2)', borderRadius: 5, padding: '3px 9px', cursor: 'pointer', fontWeight: 600, marginLeft: 4 }}>
+                    style={{ fontSize: 11, background: 'rgba(239,68,68,.12)', color: '#F87171', border: '1px solid rgba(239,68,68,.22)', borderRadius: 5, padding: '3px 9px', cursor: 'pointer', fontWeight: 600, marginLeft: 4 }}>
                     ☑ Select all HIGH
                   </button>
                 </div>
@@ -1271,7 +1271,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                       <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700 }}>{row.ngram}</span>
                       <span style={{ fontSize: 10, color: 'var(--text3)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px' }}>{row.combo_type}</span>
                       <div style={{ flex: 1 }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', fontFamily: 'var(--mono)' }}>${row.wasted_spend?.toFixed(2)} wasted</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#F87171', fontFamily: 'var(--mono)' }}>${row.wasted_spend?.toFixed(2)} wasted</span>
                       <span style={{ fontSize: 11, color: 'var(--text3)' }}>ROAS {row.roas?.toFixed(2)}x</span>
                     </div>
                     <div style={{ paddingLeft: 25, marginTop: 6 }}>
@@ -1282,7 +1282,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                             <span key={c.name} style={{ fontSize: 11, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 8px' }}>
                               <span style={{ fontWeight: 600 }}>{c.name}</span>
                               <span style={{ color: 'var(--text3)', marginLeft: 6 }}>${c.spend.toFixed(2)} · ROAS {c.roas.toFixed(2)}x</span>
-                              {c.roas < 1.0 && c.spend >= 10 && <span style={{ color: '#dc2626', marginLeft: 4, fontWeight: 600 }}>← negate here</span>}
+                              {c.roas < 1.0 && c.spend >= 10 && <span style={{ color: '#F87171', marginLeft: 4, fontWeight: 600 }}>← negate here</span>}
                               {c.roas < 1.0 && c.spend < 10 && <span style={{ color: 'var(--text3)', marginLeft: 4, fontSize: 10 }}>low spend</span>}
                             </span>
                           ))}
@@ -1293,7 +1293,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                         return <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr 1fr', gap: 10, marginTop: 4 }}>
                           <div><div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>Status</div>
                           <select value={d.status} onChange={e => update(`toxic_${row.ngram}`, 'status', e.target.value)} style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 5, padding: '5px 8px', fontSize: 12, color: 'var(--text)' }}>{Object.entries(STATUS).filter(([v]) => v !== 'reversed').map(([v, s]) => <option key={v} value={v}>{s.icon} {s.label}</option>)}</select></div>
-                          <div><div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>Apply to campaigns <span style={{ color: '#dc2626', fontWeight: 400, textTransform: 'none' as const }}>— red = recommended</span></div>
+                          <div><div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>Apply to campaigns <span style={{ color: '#F87171', fontWeight: 400, textTransform: 'none' as const }}>— red = recommended</span></div>
                           <CampButtons campaigns={summary.campaigns??[]} selected={d.campaigns} recommendedScope={row.recommended_scope} onUpdate={update} updateKey={`toxic_${row.ngram}`} /></div>
                           <div><div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3, textTransform: 'uppercase' as const, letterSpacing: '.06em' }}>Notes</div><input type="text" value={d.notes??''} placeholder="Optional…" onChange={e => update(`toxic_${row.ngram}`, 'notes', e.target.value)} style={{ width: '100%', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 5, padding: '5px 8px', fontSize: 12, color: 'var(--text)', boxSizing: 'border-box' as const }} /></div>
                         </div>
@@ -1303,7 +1303,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                 ))}
               </div>
             )}
-            {(portData.phrase_watch?.length ?? 0) > 0 && <div style={{ background: 'rgba(202,138,4,.06)', border: '1px solid rgba(202,138,4,.2)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}><div style={{ fontSize: 12, fontWeight: 600, color: '#ca8a04', marginBottom: 3 }}>🟡 Watch list — {portData.phrase_watch.length} items</div><div style={{ fontSize: 11, color: 'var(--text3)' }}>Below significance threshold. Re-review after 30 more days.</div></div>}
+            {(portData.phrase_watch?.length ?? 0) > 0 && <div style={{ background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.22)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}><div style={{ fontSize: 12, fontWeight: 600, color: '#FBBF24', marginBottom: 3 }}>🟡 Watch list — {portData.phrase_watch.length} items</div><div style={{ fontSize: 11, color: 'var(--text3)' }}>Below significance threshold. Re-review after 30 more days.</div></div>}
             {tabCounts.kw_neg === 0 && <div className="empty" style={{ height: 120 }}><div className="ei">✅</div><div>No actionable keyword negatives for this portfolio</div></div>}
             {selected.size > 0 && <div style={{ marginTop: 20, background: 'var(--surface)', border: '1px solid var(--accent)', borderRadius: 10, padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 13, fontWeight: 600 }}>{selected.size} decision{selected.size > 1 ? 's' : ''} ready to log</span>
@@ -1390,7 +1390,7 @@ function AnalysisView({ uploadIds, dateRangeDays, brand, orgId, isBulk, portfoli
                     <tbody>{portData.toxic_combos.map((r: any, i: number) => <tr key={r.ngram} style={{ background: i%2?'var(--surface2)':'var(--surface)', borderBottom:'1px solid var(--border)' }}>
                       <td style={{ padding:'7px 10px',fontFamily:'var(--mono)',fontWeight:600 }}>{r.ngram}</td>
                       <td style={{ padding:'7px 10px',color:'var(--text3)' }}>{r.combo_type}</td>
-                      <td style={{ padding:'7px 10px',fontFamily:'var(--mono)',color:'#dc2626',fontWeight:600 }}>${r.wasted_spend?.toFixed(2)}</td>
+                      <td style={{ padding:'7px 10px',fontFamily:'var(--mono)',color:'#F87171',fontWeight:600 }}>${r.wasted_spend?.toFixed(2)}</td>
                       <td style={{ padding:'7px 10px',fontFamily:'var(--mono)' }}>{r.roas?.toFixed(2)}x</td>
                       <td style={{ padding:'7px 10px',fontFamily:'var(--mono)' }}>{r.acos?.toFixed(1)}%</td>
                       <td style={{ padding:'7px 10px',fontSize:11,color:'var(--text3)' }}>{r.reason}</td>
@@ -1537,9 +1537,9 @@ function DecisionsView({ orgId, brands, initialRunId, onBack }: { orgId: string;
                   <span style={{ fontSize: 14, fontWeight: 700 }}>{portKey}</span>
                   {group.brand && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>{group.brand}</span>}
                   <span style={{ fontSize: 11, color: 'var(--text3)' }}>{allItems.length} decisions · {Object.keys(group.campaigns).length} campaigns</span>
-                  {pendingCount > 0 && <Badge color="#b45309" bg="rgba(180,83,9,.08)">⏳ {pendingCount} pending</Badge>}
-                  {actionedCount > 0 && <Badge color="#166534" bg="rgba(22,101,52,.08)">✅ {actionedCount} actioned</Badge>}
-                  {group.totalWasted > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--mono)', color: '#dc2626', fontWeight: 700 }}>${group.totalWasted.toFixed(2)} wasted</span>}
+                  {pendingCount > 0 && <Badge color="#b45309" bg="rgba(245,158,11,.12)">⏳ {pendingCount} pending</Badge>}
+                  {actionedCount > 0 && <Badge color="#166534" bg="rgba(16,185,129,.1)">✅ {actionedCount} actioned</Badge>}
+                  {group.totalWasted > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, fontFamily: 'var(--mono)', color: '#F87171', fontWeight: 700 }}>${group.totalWasted.toFixed(2)} wasted</span>}
                 </div>
                 {/* Campaign groups */}
                 {Object.entries(group.campaigns).map(([campKey, campGroup], ci) => {
@@ -1551,12 +1551,12 @@ function DecisionsView({ orgId, brands, initialRunId, onBack }: { orgId: string;
                       <div style={{ padding: '6px 16px 6px 20px', background: 'rgba(0,0,0,.02)', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid var(--border)' }}>
                         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>📢 {campKey}</span>
                         <span style={{ fontSize: 10, color: 'var(--text3)' }}>{campGroup.items.length} kw</span>
-                        {campPending > 0 && <span style={{ fontSize: 10, color: '#b45309', fontWeight: 600 }}>⏳ {campPending} pending</span>}
-                        {campWasted > 0 && <span style={{ fontSize: 10, color: '#dc2626', fontFamily: 'var(--mono)', fontWeight: 600 }}>${campWasted.toFixed(2)}</span>}
+                        {campPending > 0 && <span style={{ fontSize: 10, color: '#FBBF24', fontWeight: 600 }}>⏳ {campPending} pending</span>}
+                        {campWasted > 0 && <span style={{ fontSize: 10, color: '#F87171', fontFamily: 'var(--mono)', fontWeight: 600 }}>${campWasted.toFixed(2)}</span>}
                       </div>
                       {/* Keyword rows */}
                       {campGroup.items.map((d: any, i: number) => {
-                        const mtc   = MT_COLORS[d.match_type] ?? { color: '#6b7280', bg: 'rgba(107,114,128,.08)' }
+                        const mtc   = MT_COLORS[d.match_type] ?? { color: '#9CA3AF', bg: 'rgba(156,163,175,.1)' }
                         const isSel = selected.has(d.id)
                         const isNeg = d.match_type?.startsWith('negative')
                         const st    = STATUS[d.status as keyof typeof STATUS]
@@ -1569,8 +1569,8 @@ function DecisionsView({ orgId, brands, initialRunId, onBack }: { orgId: string;
                             <div style={{ flex: 1 }} />
                             {d.notes && <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>"{d.notes}"</span>}
                             {(d.roas_at_decision ?? 0) > 0 && <span style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'var(--mono)', flexShrink: 0 }}>ROAS {d.roas_at_decision?.toFixed(1)}x</span>}
-                            {isNeg && (d.wasted_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: '#dc2626', fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>${d.wasted_at_decision?.toFixed(2)}</span>}
-                            {!isNeg && (d.purchases_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: '#166534', fontFamily: 'var(--mono)', flexShrink: 0 }}>{d.purchases_at_decision} orders</span>}
+                            {isNeg && (d.wasted_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: '#F87171', fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>${d.wasted_at_decision?.toFixed(2)}</span>}
+                            {!isNeg && (d.purchases_at_decision ?? 0) > 0 && <span style={{ fontSize: 11, color: '#34D399', fontFamily: 'var(--mono)', flexShrink: 0 }}>{d.purchases_at_decision} orders</span>}
                             <span style={{ fontSize: 10, flexShrink: 0, fontWeight: 600, color: st?.color ?? 'var(--text3)' }}>{st?.icon ?? '⏳'} {st?.label ?? d.status}</span>
                             <span style={{ fontSize: 10, color: 'var(--text3)', minWidth: 40, textAlign: 'right' as const, flexShrink: 0 }}>{new Date(d.decided_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
                           </div>
@@ -1719,7 +1719,7 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn-secondary" onClick={() => setView('decisions')}>
-            {pendingCount > 0 && <span style={{ marginRight: 6, background: '#dc2626', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{pendingCount}</span>}
+            {pendingCount > 0 && <span style={{ marginRight: 6, background: '#F87171', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{pendingCount}</span>}
             📋 Decisions log
           </button>
           <button className="btn-primary" onClick={() => setView('upload')}>＋ Upload new file</button>
@@ -1762,16 +1762,16 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                           {upload.brand && <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent)' }}>{upload.brand}</span>}
                           {isBulk
-                            ? <Badge color="#7c3aed" bg="rgba(124,58,237,.08)">Bulk · {totalPorts} portfolios</Badge>
+                            ? <Badge color="#7c3aed" bg="rgba(139,92,246,.12)">Bulk · {totalPorts} portfolios</Badge>
                             : item.group && item.group.length > 1
-                              ? <Badge color="#0f766e" bg="rgba(15,118,110,.08)">{item.group.length} campaigns</Badge>
+                              ? <Badge color="#0f766e" bg="rgba(20,184,166,.12)">{item.group.length} campaigns</Badge>
                               : <span style={{ fontSize: 12, fontWeight: 600 }}>{upload.filename?.replace(/\.(csv|xlsx)$/i, '')}</span>
                           }
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', gap: 10, flexWrap: 'wrap' as const }}>
                           <span>{(item.group ? item.group.reduce((s: number, u: any) => s + (u.row_count ?? 0), 0) : (upload.row_count ?? 0)).toLocaleString()} rows</span>
                           <span style={{ fontWeight: 600, color: 'var(--text)' }}>{dateLabel}</span>
-                          {isBulk && donePorts.length > 0 && <span style={{ color: '#166534', fontWeight: 600 }}>✓ {donePorts.length}/{totalPorts} portfolios analysed</span>}
+                          {isBulk && donePorts.length > 0 && <span style={{ color: '#34D399', fontWeight: 600 }}>✓ {donePorts.length}/{totalPorts} portfolios analysed</span>}
                           {isBulk && donePorts.length === 0 && <span>No portfolios analysed yet</span>}
                         </div>
                       </div>
@@ -1814,16 +1814,16 @@ export default function PPCDashboard({ userEmail }: { userEmail: string }) {
                             </div>
                             <div>
                               <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>Wasted </span>
-                              <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)', color: '#dc2626' }}>${totalWasted.toFixed(0)}</span>
+                              <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--mono)', color: '#F87171' }}>${totalWasted.toFixed(0)}</span>
                               <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 4 }}>{totalSpend > 0 ? ((totalWasted / totalSpend) * 100).toFixed(0) : 0}%</span>
                             </div>
                             <div>
                               <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>HIGH terms </span>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: '#dc2626' }}>{totalHigh}</span>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#F87171' }}>{totalHigh}</span>
                             </div>
                             <div>
                               <span style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' as const, letterSpacing: '.06em', fontWeight: 600 }}>Harvest kw </span>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: '#166534' }}>{totalHarvest}</span>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: '#34D399' }}>{totalHarvest}</span>
                             </div>
                             <div style={{ flex: 1 }} />
                             <span style={{ fontSize: 10, color: 'var(--text3)', alignSelf: 'center' }}>across {donePorts.length} analysed portfolios</span>
