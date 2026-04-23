@@ -6,6 +6,7 @@ import type { User } from '@supabase/supabase-js'
 import type { Product, Supplier, ChangeLog, Cost } from '@/lib/types'
 import { BRANDS, calcUsd } from '@/lib/types'
 import ProductSheet from './ProductSheet'
+import ProductStats from './ProductStats'
 import CostMaster from './CostMaster'
 import UpcManager from './UpcManager'
 import Pipeline from './Pipeline'
@@ -354,19 +355,28 @@ export default function AppShell({ user, onSignOut }: { user: User; onSignOut: (
           ) : (
             <>
               {tab === 'catalog' && (
-                <ProductSheet
-                  products={filtered}
-                  allProducts={products}
-                  dupeSkus={dupeSkus}
-                  suppliers={suppliers}
-                  changelog={changelog}
-                  userEmail={user.email ?? ''}
-                  brandFilter={brandFilter}
-                  onSave={saveProduct}
-                  onDelete={deleteProduct}
-                  onSaveSupplier={saveSupplier}
-                  onDeleteSupplier={deleteSupplier}
-                />
+                <>
+                  <ProductStats
+                    products={activeProducts}
+                    filtered={filtered}
+                    dupeCount={dupeSkus.size}
+                    currentStatusFilter={statusFilter}
+                    onStatusFilter={setStatusFilter}
+                  />
+                  <ProductSheet
+                    products={filtered}
+                    allProducts={products}
+                    dupeSkus={dupeSkus}
+                    suppliers={suppliers}
+                    changelog={changelog}
+                    userEmail={user.email ?? ''}
+                    brandFilter={brandFilter}
+                    onSave={saveProduct}
+                    onDelete={deleteProduct}
+                    onSaveSupplier={saveSupplier}
+                    onDeleteSupplier={deleteSupplier}
+                  />
+                </>
               )}
               {tab === 'pipeline' && (
                 <Pipeline
